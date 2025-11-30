@@ -1,14 +1,26 @@
---[[pod_format="raw",created="2025-11-28 15:29:10",modified="2025-11-28 21:41:27",revision=72]]
-local ffetch=function() --replaced in :init() - ensures locality
-	return nil
-end
-local webWarning=function() --replaced in :init() - ensures locality
-	return nil
-end
+local ffetch=fetch --replaced in :init() - ensures locality
+local webWarning=printh --replaced in :init() - ensures locality
+local pageDirty=false
+local buildingPage=false
+
 local scripting=false
 
 local baseurl
 local page={}
+--sandbox functs
+
+local function sandboxedFunct(funct,safe_env,nilerror)
+	if (nilerror==nil) nilerror=true
+	if safe_env and type(safe_env[funct]) == "function" then
+		local ok, err = pcall(safe_env[funct],safe_env)
+		if not ok then
+			webWarning(funct.."() error: " .. tostring(err))
+		end
+	elseif (nilerror) then
+		webWarning(funct.." not found")
+	end
+end
+
 --helper
 local function swapCase(txt)
 	txt=txt:gsub("%a", function(c)
@@ -32,19 +44,41 @@ local function textEntities(text)
 	return text
 end
 
-local function rPath(path)
-	local segments = {}
+local function rPath(path,base)
+	local prot=""
+	if (path:prot()) then
+		return path
+	end
+
+	if (base and base!="/") then
+		local baseProt=base:prot()
+		prot=baseProt and (baseProt.."://") or ""
 	
+		if (baseProt) then
+			base=base:sub(#prot + 1)
+		end
+	
+		if (base:sub(-1)=="/") then
+			base=base:sub(1,-2)
+		end
+		
+		if (base:ext()) then
+			base=base:sub(1,#base-#base:basename())
+		end
+		base=base.."/"
+		path=base..path
+	end
+	local segments = {}
 	for part in path:gmatch("[^/]+") do
 		if (part=="..") then
 			if (#segments>0) then
-				del(segments)
+				table.remove(segments)
 			end
 		elseif (part!="." and part!="") then
 			add(segments, part)
 		end
 	end
-	return table.concat(segments, "/")
+	return prot..table.concat(segments, "/")
 end
 
 --resolved fetch, supports ../ and stuff
@@ -53,14 +87,9 @@ local function rFetch(path)
 		local rpath=rPath(path)
 		
 		local base=baseurl
-		local lastSlash=base:match(".*/()")
-		if (lastSlash) then
-			local filename=base:sub(lastSlash)
-			if (filename:find("%.")) then
-				base=base:sub(1,lastSlash-1)
-			end
+		if (baseurl:ext()!=nil) then
+			base=base:sub(1,#baseurl-#baseurl:basename())
 		end
-		
 		return ffetch(base..rpath)
 	else
 		--it's a direct url
@@ -84,9 +113,9 @@ end
 local function getMetadata(node)
 	local meta={}
 	--defaults
-	meta.title="Unnamed Page"
+	meta.title=""
 	meta.description=""
-	meta.author="Unknown Author"
+	meta.author=""
 --	meta.tags={} setup future
 	for key,val in pairs(node) do
 		local v=val
@@ -109,8 +138,10 @@ local function getMetadata(node)
 	return meta
 end
 
-local function attachScript(src,env)
+local function attachScript(src,env,self)
 	if (not scripting) return
+	if (env.__attachedScripts[src]) return
+	env.__attachedScripts[src]=true
 	local code=rFetch(src)
 	if (code==nil) then
 		webWarning("Code not found from "..src)
@@ -136,9 +167,50 @@ end
 
 local function destroyElement(obj)
 	if (type(obj)=="string") then
-		obj=page:getElementById(obj)
+		obj=page:getRawElementById(obj)
+	else
+		obj=page:getRawElementById(obj.id)
 	end
 	del(page.builtPage,obj)
+end
+
+local function editableElement(el)
+	local wrapper={} --read 
+	wrapper._el=el
+	
+	wrapper.set=function(_,key,val)
+		pageDirty=true
+		if (key=="text") then
+			rawset(el,"rawtext",val)
+			rawset(el,"underlinecache",nil)
+		elseif (key=="id") then
+			if (el.id) then
+				page.idLookup[el.id]=nil
+			end
+			page.idLookup[val]=el
+		end
+		el[key]=val
+	end
+	
+	setmetatable(wrapper, {
+		__index = function(t, k)
+			if k == "set" then
+				return rawget(t, "set")
+			end
+			return el[k] -- forward reads to the actual element
+		end,
+		__newindex = function(t, k, v)
+			webWarning("Attempt to modify element directly. Use el:set(key, value)")
+		end,
+		__metatable = false -- prevent changing metatable
+	})
+	
+	return wrapper
+end
+
+local function pushElement(obj)
+	local obj,success,msg=page:pushElement(obj)
+	return editableElement(obj),success,msg
 end
 
 local function openTab(url,replaceIndex)
@@ -272,25 +344,20 @@ local objectHandler={
 	text=function(data,builder,pageData,x,y)
 		data=fixData(data)
 		local pushbuild=true
-		if (not (data.x and data.y)) then
-			x,y=builder.x,builder.y
-		else
-			pushbuild=false
-		end
-		local rawtext=data.text or ""
+		x,y=builder.x,builder.y
+		local rawtext=data.rawtext or data.text or ""
 		local text,nl,width=wrapText(rawtext,pageData.width,5)
-		local col=data.color or builder.color
+		local col=data.color or 0
 		local height=nl*11
 		if (pushbuild) then
 			builder.y+=data.margin_top+height+data.margin_bottom
-			builder.color=col
 		end
 		x,y=applyAlignment(data.align,x,y,width,height,pageData)
 		x,y=applyMargin(data,x,y)
 		return {
 			x=x,y=y,
 			width=width,height=height,
-			rawtext=data.text,
+			rawtext=rawtext,
 			text=text,
 			color=col,
 			hover=false,
@@ -300,9 +367,8 @@ local objectHandler={
 				if (self.underline) then
 					if (not self.underlinecache) self.underlinecache=self.text:gsub("[^\n]","_")
 					print(self.underlinecache,self.x,self.y+2,self.color)
+					print(self.underlinecache,self.x,self.y+2,self.color)
 					print(self.underlinecache,self.x-1,self.y+2,self.color)
-				else
-					self.underlinecache=nil
 				end
 			end
 		},builder
@@ -310,18 +376,13 @@ local objectHandler={
 	title=function(data,builder,pageData,x,y)
 		data=fixData(data,{margin_top=2,align="center"})
 		local pushbuild=true
-		if (not (data.x and data.y)) then
-			x,y=builder.x,builder.y
-		else
-			pushbuild=false
-		end
-		local rawtext=data.text or ""
+		x,y=builder.x,builder.y
+		local rawtext=data.rawtext or data.text or ""
 		local text,nl,width=wrapText(rawtext,pageData.width,10)
-		local col=data.color or builder.color
+		local col=data.color or 0
 		local height=nl*22
 		if (pushbuild) then
 			builder.y+=data.margin_top+height+data.margin_bottom
-			builder.color=col
 		end
 		x,y=applyAlignment(data.align,x,y,width,height,pageData)
 		x,y=applyMargin(data,x,y)
@@ -344,8 +405,6 @@ local objectHandler={
 					print("\^p"..self.underlinecache,self.x-1,self.y+4,self.color)
 					print("\^p"..self.underlinecache,self.x-2,self.y+4,self.color)
 					print("\^p"..self.underlinecache,self.x-3,self.y+4,self.color)
-				else
-					self.underlinecache=nil
 				end
 			end
 		},builder
@@ -353,12 +412,8 @@ local objectHandler={
 	link=function(data,builder,pageData,x,y)
 		data=fixData(data,{})
 		local pushbuild=true
-		if (not (data.x and data.y)) then
-			x,y=builder.x,builder.y
-		else
-			pushbuild=false
-		end
-		local rawtext=data.text or ""
+		x,y=builder.x,builder.y
+		local rawtext=data.rawtext or data.text or ""
 		local text,nl,width=wrapText(rawtext,pageData.width,5)
 		local col=data.color or 12
 		local height=nl*11
@@ -372,7 +427,7 @@ local objectHandler={
 			x=x,y=y,
 			width=width,height=height,
 			cursor="pointer",
-			rawtext=data.text,
+			rawtext=rawtext,
 			text=text,
 			color=col,
 			hovercol=hovercol,
@@ -390,8 +445,6 @@ local objectHandler={
 					if (not self.underlinecache) self.underlinecache=self.text:gsub("[^\n]","_")
 					print(self.underlinecache,self.x,self.y+2,c)
 					print(self.underlinecache,self.x-1,self.y+2,c)
-				else
-					self.underlinecache=nil
 				end
 			end,
 			leftmouseclick=[[openTab(self.target,self.where)]],
@@ -401,24 +454,19 @@ local objectHandler={
 	p8text=function(data,builder,pageData,x,y)
 		data=fixData(data,{margin_bottom=3})
 		local pushbuild=true
-		if (not (data.x and data.y)) then
-			x,y=builder.x,builder.y
-		else
-			pushbuild=false
-		end
-		local rawtext=data.text or ""
-		local text,nl,width=wrapText(swapCase(rawtext),pageData.width,3)
-		local col=data.color or builder.color
+		x,y=builder.x,builder.y
+		local rawtext=data.rawtext or data.text or ""
+		local text,nl,width=wrapText(swapCase(rawtext),pageData.width,4)
+		local col=data.color or 0
 		local height=nl*6
 		if (pushbuild) then
 			builder.y+=data.margin_top+height+data.margin_bottom
-			builder.color=col
 		end
 		x,y=applyAlignment(data.align,x,y,width,height,pageData)
 		x,y=applyMargin(data,x,y)
 		return {
 			x=x,y=y,
-			rawtext=data.text,
+			rawtext=rawtext,
 			text=text,
 			color=col,
 			width=width,height=height,
@@ -430,8 +478,6 @@ local objectHandler={
 					if (not self.underlinecache) self.underlinecache=self.text:gsub("[^ \n]","_")
 					print("\014"..self.underlinecache,self.x,self.y+2,self.color)
 					print("\014"..self.underlinecache,self.x-1,self.y+2,self.color)
-				else
-					self.underlinecache=nil
 				end
 			end
 		},builder
@@ -440,11 +486,7 @@ local objectHandler={
 		data=fixData(data)
 		
 		local pushbuild=true
-		if (not (data.x and data.y)) then
-			x,y=builder.x,builder.y
-		else
-			pushbuild=false
-		end
+		x,y=builder.x,builder.y
 		local img=toImage(data.src)
 		if (img) then
 			local w=data.width or img:width()
@@ -517,7 +559,7 @@ local objectHandler={
 			end
 		},builder
 	end,
-	comment=function(data,builder,x,y,pageData)
+	comment=function(data,builder,pageData,env,x,y)
 		--delete on update, no purpose except commenting code for developers
 		return {
 			x=0,y=0,
@@ -527,6 +569,74 @@ local objectHandler={
 			end
 		},builder
 	end,
+	input=function(data,builder,pageData,env,x,y)
+		--input text
+		data=fixData(data)
+		local pushbuild=true
+		x,y=builder.x,builder.y
+		local rawtext=data.rawtext or data.text or ""
+		local text=rawtext
+		local wwidth=#text*5
+		data.dynamic_width=(data.dynamic_width!=nil and data.dynamic_width) or (data.width!=nil)
+		local width=data.width or mid(30,wwidth,pageData.width-30)
+		local col=data.color or 7
+		local bg=data.background or 1
+		local height=11
+		if (pushbuild) then
+			builder.y+=data.margin_top+height+data.margin_bottom
+		end
+		x,y=applyAlignment(data.align,x,y,width,height,pageData)
+		x,y=applyMargin(data,x,y)
+		return {
+			x=x,y=y,
+			width=width,height=height,
+			dynamic_width=data.dynamic_width or (data.width!=nil),
+			rawtext=rawtext,
+			text=text,
+			background=bg,
+			placeholder=data.placeholder or "",
+			placeholder_color=data.placeholder_color or 6,
+			color=col,
+			hover=false,
+			cursor="edit",
+			selected=false,
+			draw=function(self)
+				rectfill(self.x,self.y,self.x+self.width-1,self.y+self.height-1,self.background)
+				local t=self.text
+				if (#t==0) then
+					if (not self.selected) print(self.placeholder,self.x+1,self.y+1,self.placeholder_color)
+				else
+					print(t,self.x+1,self.y+1,self.color)
+				end
+				if (self.selected) then
+					local xx=self.x+#t*5+1
+					local yy=self.y+1
+					rectfill(xx,yy,xx+4,yy+8,14)
+				end
+			end,
+			__raw_update=[[
+				local inp=readtext()
+				if (keyp("enter") and self.enter) self:enter()
+				if (keyp("tab") and self.tab) self:tab()
+				if (keyp("backspace")) then
+					self.text=self.text:sub(1,-2)
+				end
+				if (inp) then
+					self.text..=inp
+				end
+				if (self.dynamic_width) then
+					local t=self.text
+					if (#t==0) t=self.placeholder or ""
+					self.width=mid(30,#t*5+7,__viewport.width-30)
+				end
+				--deselect if you click off
+				if (not self.hover and __cursorData.b==0x1) self.selected=false
+			]],
+			leftmouseclick=[[
+				self.selected=true
+			]]
+		},builder
+	end
 }
 
 --element method
@@ -534,7 +644,7 @@ local function callElementMethod(el, method)
 	local fn=el[method]
 	if (not fn) return
 	
-	local env=env
+	local env=page.env
 	
 	local ok, err
 	--has to be string functions to sandbox
@@ -559,26 +669,40 @@ end
 
 --rip page
 
-local pagenotfoundcheck=[[<!DOCTYPE html>
+local fails={[[<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Not Found</title>
+    <link href="/style.css" rel="stylesheet" type="text/css" media="all">
+  </head>
+  <body>
+    <h1>Page Not Found</h1>
+    <p>The requested page was not found.</p>
+  </body>
+</html>]],[[<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <title>Error</title>
 </head>
 <body>
-]]
+]]}
 
-local function ripPage(url)
+local function ripPage(url,self)
 	local raw=ffetch(url)
 	if (raw==nil) return nil
-	if (raw:sub(0,#pagenotfoundcheck)==pagenotfoundcheck) return nil
-	local res={}
-	
+	for i=1, #fails do
+		if (raw:sub(0,#fails[i])==fails[i]) return nil
+	end
+	self.rippedPage={}
 	for type, attrs, content in raw:gmatch("<([%a_][%w_]*)%s*([^>]*)>(.-)</%1>") do
 		local node = {
-			type = type,
-			text = textEntities(content)
+			type=type,
+			text=textEntities(content)
 		}
+		if (node.text=="") node.text=nil
 		
 		-- quoted attributes
 		for key, quote, val in attrs:gmatch("(%w+)%s*=%s*(['\"])(.-)%2") do
@@ -599,78 +723,110 @@ local function ripPage(url)
 				end
 			end
 		end
-		
-		add(res,node)
+		add(self.rippedPage,node)
 	end
-	return res
+	return self.rippedPage
 end
 
-local function append(obj,page,builder,pageData,env)
+
+local function drawPage(page,ud)
+	local trg=get_draw_target()
+	set_draw_target(ud)
+	for i=1, #page do
+		if (not page[i].ignore) then
+			if (page[i].draw) page[i]:draw()
+		end
+	end
+	set_draw_target(trg)
+end
+
+local function append(obj,page,builder,pageData,env,self)
 	local funct=objectHandler[obj.type]
+	if (obj.id) then
+		self.idLookup[obj.id]=#page+1
+	end
 	if (funct) then
 		local banned={}
+		local scriptingAttribs={
+			leftmousedown=true,
+			leftmouseclick=true,
+			leftmouseunpress=true,
+			rightmousedown=true,
+			rightmouseclick=true,
+			rightmouseunpress=true,
+			middlemousedown=true,
+			middlemouseclick=true,
+			middlemouseunpress=true,
+			wheelx=true,
+			wheely=true,
+			update=true,
+			draw=true,
+			__raw_update=true,
+			enter=true,
+			tab=true
+		}
 		if (not scripting) then
-			add(banned,"leftmousedown")
-			add(banned,"leftmouseclick")
-			add(banned,"leftmouseunpress")
-			add(banned,"rightmousedown")
-			add(banned,"rightmouseclick")
-			add(banned,"rightmouseunpress")
-			add(banned,"middlemousedown")
-			add(banned,"middlemouseclick")
-			add(banned,"middlemouseunpress")
-			add(banned,"wheelx")
-			add(banned,"wheely")
-			add(banned,"update")
-			add(banned,"draw")
+			for k,_ in pairs(scriptingAttribs) do
+				banned[k]=true
+			end
 		end
 		local object,newBuilder=funct(obj,builder,pageData,env)
-		add(page,object)
 		--set custom values
 		for key,val in pairs(obj) do
 			if (not banned[key]) then
 				object[key]=object[key] or val
 			end
 		end
-		--add to id lookup table
-		if (object.id) then
-			page.idLookup[object.id]=#page
+		for key,val in pairs(object) do
+			if (scriptingAttribs[key]) then
+				if (type(val)=="string") then
+					local fn,err=load("return function(self) "..val.." end", key, "t", env)
+					if (fn) then
+						object[key]=fn()
+					else
+						webWarning("Failed to compile "..key..": "..tostr(err))
+						object[key]=nil
+					end
+				end
+			end
 		end
+		add(page,object)
 		builder=newBuilder
-		return true
+		return object,true,"success"
 	else
-		return false,"no object handler"
+		obj.ignore=true
+		add(page,obj)
+		return obj,false,"no object handler"
 	end
 end
 -- src being a url, filepath or a table
-local function buildPage(src,pageData,env)
+local function buildPage(src,pageData,env,self)
+	buildingPage=true
 	local page={idLookup={}}
-	local pageBuilder={
-		x=0,y=0,color=0
+	self.pageBuilder={
+		x=0,y=0
 	}
 	local meta={}
 	if (type(src)=="string") then
-		src=ripPage(src)
+		src=ripPage(src,self)
 	elseif (type(src)!="table") then
 		return false,"can't handle type: "..type(src)
 	end
 	if (src==nil) printh("src is nil, failed to load page") return false,"src is nil"
 	local meta=getMetadata({})
+	
 	for i=1, #src do
 		if (src[i].type=="metadata") then
 			meta=getMetadata(src[i])
+			append(src[i],page,self.pageBuilder,self.pageData,env,self)
 		else
-			append(src[i],page,pageBuilder,pageData,env)
+			append(src[i],page,self.pageBuilder,self.pageData,env,self)
 		end
 	end
-	local height=pageBuilder.y
+	local height=self.pageBuilder.y
+	drawPage(page,userdata("u8",1,1)) --flush anything that updates here, e.g: underlinecache
+	buildingPage=false
 	return src,page,meta,height -- return decompiled form of page, built page, metadata & new height
-end
-
-local function drawPage(page)
-	for i=1, #page do
-		if (page[i].draw) page[i]:draw()
-	end
 end
 
 local function updatePage(self,page,cursorData)
@@ -678,12 +834,17 @@ local function updatePage(self,page,cursorData)
 	--get object at x,y
 	local el
 	for i=#page,1,-1 do
-		if (page[i].update) page[i]:update()
-		if (#page>=i) then
-			if (page[i].x<=x and page[i].x+page[i].width>=x and page[i].y<=y and page[i].y+page[i].height>=y) then
-				el=page[i]
-			else
-				page[i].hover=false
+		if (not page[i].ignore) then
+			if (page[i].__raw_update) callElementMethod(page[i],"__raw_update")
+			if (page[i].update) callElementMethod(page[i],"update")
+			if (page[i]) then
+				if (#page>=i) then
+					if (page[i].x<=x and page[i].x+page[i].width>=x and page[i].y<=y and page[i].y+page[i].height>=y) then
+						el=page[i]
+					else
+						page[i].hover=false
+					end
+				end
 			end
 		end
 	end
@@ -719,7 +880,7 @@ local function updatePage(self,page,cursorData)
 				if (el.middlemouseclick) callElementMethod(el,"middlemouseclick")
 			end
 			if (munpress) then
-				if (el.middlemouseunpress) callElementMethod(el,"middlemouseunprses")
+				if (el.middlemouseunpress) callElementMethod(el,"middlemouseunpress")
 			end
 		end
 		--scrollwheel
@@ -970,7 +1131,8 @@ local permittedFunctions={
 		risk=1,
 		functions={
 			getElementById=getElementById,
-			destroyElement=destroyElement
+			destroyElement=destroyElement,
+			pushElement=pushElement
 		}
 	},
 	fetch={
@@ -1026,20 +1188,6 @@ local function loadPermissions(environment,allowed)
 	return environment
 end
 
---sandbox functs
-
-function sandboxedFunct(funct,safe_env,nilerror)
-	if (nilerror==nil) nilerror=true
-	if safe_env and type(safe_env[funct]) == "function" then
-		local ok, err = pcall(safe_env[funct],safe_env)
-		if not ok then
-			webWarning(funct.."() error: " .. tostring(err))
-		end
-	elseif (nilerror) then
-		webWarning(funct.." not found")
-	end
-end
-
 --sandbox
 
 local function buildEnvironment(permissions,data,pageData)
@@ -1053,6 +1201,7 @@ local function buildEnvironment(permissions,data,pageData)
 	scriptEnvironment.__scrollSpeed=data.scrollSpeed or 8
 	scriptEnvironment.__pageData=pageData
 	scriptEnvironment.__viewport={width=0,height=0}
+	scriptEnvironment.__attachedScripts={} --unlisted
 	--allowed defaults
 	scriptEnvironment=loadPermissions(scriptEnvironment,permissions)
 --	setmetatable(scriptEnvironment, {
@@ -1098,8 +1247,26 @@ end
 --code here
 
 --communicate with thyself
-page.getElementById=function(self,id)
-	return self.builtPage[self.builtPage.idLookup[id]]
+page.getElementById = function(self, id)
+	local el = self.builtPage[self.idLookup[id]]
+	if (not el) return nil
+	
+	return editableElement(el)
+end
+
+page.getRawElementById = function(self, id)
+	local el = self.builtPage[self.idLookup[id]]
+	if (not el) return nil
+	
+	return el
+end
+
+page.pushElement=function(self,obj)
+	if (type(obj)=="string") then
+		obj={type=obj}
+	end
+	local obj,success,msg=append(obj,self.builtPage,self.pageBuilder,self.pageData,self.env,self)
+	return obj,success,msg
 end
 
 page.newTab=function(self,url,selff)
@@ -1127,9 +1294,64 @@ page.setDisplay=function(self,width,height,generate)
 	self.pageData.width=width
 	self.pageData.height=0
 	if (generate and (self.width!=lw and self.height!=lh)) then
-		_,self.builtPage,self.meta,self.pageData.height=buildPage(self.rippedPage,self.pageData,self.env)
-		self.browserCommunication.metadata(self.meta)
+		pageDirty=true
 	end
+end
+
+page.rip=function(self,url)
+	if (url:ext()==nil) url=url.."/"
+	if (url:sub(-1)=="/") then
+		url=url.."main.picoml"
+	end
+	local rip=ripPage(url,self)
+	local meta={}
+	baseurl=url
+	return rip,url
+end
+
+page.cleanRip=function(self,url)
+	local rip,url=page:rip(url)
+	if (rip==nil) return nil
+	local start=url
+	if (start:ext()!=nil) then
+		start=start:sub(1,#start-#start:basename())
+	end
+	--clean form which localises src and target
+	for i=1, #rip do
+		if (rip[i].src) rip[i].src=rPath(rip[i].src,start)
+		if (rip[i].target) rip[i].target=rPath(rip[i].target,start)
+	end
+	return rip,meta,url
+end
+
+--cleanRip + metadata
+page.extensiveRip=function(self,url)
+	local rip,url=page:rip(url)
+	if (rip==nil) return nil
+	local start=url
+	if (start:ext()!=nil) then
+		start=start:sub(1,#start-#start:basename())
+	end
+	--clean form which localises src and target
+	for i=1, #rip do
+		if (rip[i].src) rip[i].src=rPath(rip[i].src,start)
+		if (rip[i].target) rip[i].target=rPath(rip[i].target,start)
+		--also get meta
+		if (rip[i].type=="metadata") then
+			meta=getMetadata(rip[i])
+		end
+	end
+	return rip,meta,url
+end
+
+page.rebuild=function(self)
+	if (not self.hasinit) return
+	self.idLookup={}
+	if (not self.builtPage) then
+		self.builtPage=self.rippedPage
+	end
+	_,self.builtPage,self.meta,self.pageData.height=buildPage(self.builtPage,self.pageData,self.env,self)
+	self.browserCommunication.metadata(self.meta or {})
 end
 
 page.init=function(self,data)
@@ -1141,17 +1363,20 @@ page.init=function(self,data)
 	self.pageData={width=0,height=0}
 	self:setDisplay(data.width,data.height,false)
 	ffetch=data.fetch
-	self.rippedPage=ripPage(data.url)
-	self.lastcurs={}
+	self.rippedPage=ripPage(data.url,self)
+	if (self.rippedPage==nil) return "404"
 	self.lastcurs={}
 	self.browserCommunication={}
 	self.browserCommunication.newTab=data.newTab
 	self.browserCommunication.metadata=data.metadata
-	_,self.builtPage,self.meta,self.pageData.height=buildPage(self.rippedPage,self.pageData,self.env)
-	self.browserCommunication.metadata(self.meta)
+	self.hasinit=true
+	self:rebuild()
 end
 
 page.update=function(self,data)
+	if (self.rippedPage==nil) return "404"
+	if (not self.hasinit) return {}
+	if (pageDirty) pageDirty=false self:rebuild()
 	local curs=data.mousedata
 	--ensure only affects if in page viewport
 	if (curs.x<0 or curs.y<0 or curs.x>self.width or curs.y>self.height) then
@@ -1168,13 +1393,13 @@ page.update=function(self,data)
 	updatePage(self,self.builtPage,curs)
 	sandboxedFunct("__raw_update",self.env,false)
 	sandboxedFunct("_update",self.env,false)
-	env=self.env
 	return {
 		cursorSprite=self.env.__cursorSprite
 	}
 end
 
 page.draw=function(self,x,y)
+	if (self.hasinit==false or self.rippedPage==nil) return userdata("u8",1,1)
 	local scroll=self.env.__scroll
 	camera(scroll.x,scroll.y)
 	local w,h=self.width,self.height
@@ -1182,7 +1407,7 @@ page.draw=function(self,x,y)
 	set_draw_target(ud)
 	pal(0,32)
 	cls(self.env.__background)
-	drawPage(self.builtPage)
+	drawPage(self.builtPage,ud)
 	camera()
 	sandboxedFunct("_draw",self.env,false)
 	if (self.env.__scrollbarVisible) then
@@ -1196,4 +1421,5 @@ page.draw=function(self,x,y)
 	return ud
 end
 
-return page
+page.hasinit=false
+return page,"2.0"

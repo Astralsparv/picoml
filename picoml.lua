@@ -1,3 +1,4 @@
+--[[pod_format="raw",created="2025-11-28 15:29:10",modified="2025-11-30 19:19:46",revision=1129]]
 local ffetch=fetch --replaced in :init() - ensures locality
 local webWarning=printh --replaced in :init() - ensures locality
 local pageDirty=false
@@ -107,6 +108,8 @@ local function toImage(img)
 			if (type(img)=="string") img=nil
 		end
 	end
+	if (img==nil) return nil
+	local ud=userdata("u8",img:width(),img:height())
 	return img
 end
 
@@ -341,7 +344,7 @@ local function applyAlignment(align,x,y,width,height,pageData)
 end
 
 local objectHandler={
-	text=function(data,builder,pageData,x,y)
+	text=function(data,builder,pageData,env,x,y)
 		data=fixData(data)
 		local pushbuild=true
 		x,y=builder.x,builder.y
@@ -373,7 +376,7 @@ local objectHandler={
 			end
 		},builder
 	end,
-	title=function(data,builder,pageData,x,y)
+	title=function(data,builder,pageData,env,x,y)
 		data=fixData(data,{margin_top=2,align="center"})
 		local pushbuild=true
 		x,y=builder.x,builder.y
@@ -409,7 +412,7 @@ local objectHandler={
 			end
 		},builder
 	end,
-	link=function(data,builder,pageData,x,y)
+	link=function(data,builder,pageData,env,x,y)
 		data=fixData(data,{})
 		local pushbuild=true
 		x,y=builder.x,builder.y
@@ -423,6 +426,10 @@ local objectHandler={
 		local hovercol=data.hovercolor or 1
 		x,y=applyAlignment(data.align,x,y,width,height,pageData)
 		x,y=applyMargin(data,x,y)
+		local leftmouseclick=[[openTab(self.target,self.where)]]
+		if (data.method=="download") then
+			leftmouseclick=[[download(self.target)]]
+		end
 		return {
 			x=x,y=y,
 			width=width,height=height,
@@ -435,6 +442,7 @@ local objectHandler={
 			where=data.where or "new",
 			hover=false,
 			underline=data.underline or true,
+			method=data.method or "link",
 			draw=function(self)
 				local c=self.color
 				if (self.hover) then
@@ -447,11 +455,11 @@ local objectHandler={
 					print(self.underlinecache,self.x-1,self.y+2,c)
 				end
 			end,
-			leftmouseclick=[[openTab(self.target,self.where)]],
+			leftmouseclick=leftmouseclick,
 			middlemouseclick=[[openTab(self.target,"new")]]
 		},builder
 	end,
-	p8text=function(data,builder,pageData,x,y)
+	p8text=function(data,builder,pageData,env,x,y)
 		data=fixData(data,{margin_bottom=3})
 		local pushbuild=true
 		x,y=builder.x,builder.y
@@ -482,7 +490,7 @@ local objectHandler={
 			end
 		},builder
 	end,
-	image=function(data,builder,pageData,x,y)
+	image=function(data,builder,pageData,env,x,y)
 		data=fixData(data)
 		
 		local pushbuild=true
@@ -522,6 +530,7 @@ local objectHandler={
 			
 			local timg = userdata("u8",w,h)
 			set_draw_target(timg)
+			cls(env.__background)
 			sspr(img,0,0,nil,nil,0,0,w,h)
 			set_draw_target()
 			img=timg
@@ -822,6 +831,8 @@ local function buildPage(src,pageData,env,self)
 		else
 			append(src[i],page,self.pageBuilder,self.pageData,env,self)
 		end
+		--clear underline cache (for resizing)
+		page[#page].underlinecache=nil
 	end
 	local height=self.pageBuilder.y
 	drawPage(page,userdata("u8",1,1)) --flush anything that updates here, e.g: underlinecache
@@ -898,6 +909,20 @@ end
 local function sandboxedPrinth(text)
 	text="WEBPAGE: "..tostr(text)
 	printh(text)
+end
+
+--data = either website.com/icon.png OR raw filedata
+--filename = blank if using website, must set for raw filedata
+local function pageDownload(data,filename)
+	if (data==nil) webWarning("No data attached to download") return "No data attached to download"
+	if (filename==nil) then
+		filename=data:basename()
+		data=fetch(data)
+		if (data==nil) then
+			webWarning("Failed to download - download(data/filename,[filename])") return "Failed to download - download(data/filename,[filename])"
+		end
+	end
+	page:download(data,filename)
 end
 
 local permittedFunctions={
@@ -1161,7 +1186,8 @@ local permittedFunctions={
 		risk=2,
 		functions={
 			openTab=openRelativeTab,
-			openRelativeTab=openRelativeTab
+			openRelativeTab=openRelativeTab,
+			download=pageDownload
 		}
 	},
 	attachScripts={
@@ -1270,7 +1296,11 @@ page.pushElement=function(self,obj)
 end
 
 page.newTab=function(self,url,selff)
-	page.browserCommunication.newTab(url,selff)
+	self.browserCommunication.newTab(url,selff)
+end
+
+page.download=function(self,data,filename)
+	self.browserCommunication.download(baseurl,data,filename)
 end
 
 --[[
@@ -1292,7 +1322,6 @@ page.setDisplay=function(self,width,height,generate)
 	self.width=width
 	self.height=height
 	self.pageData.width=width
-	self.pageData.height=0
 	if (generate and (self.width!=lw and self.height!=lh)) then
 		pageDirty=true
 	end
@@ -1369,6 +1398,7 @@ page.init=function(self,data)
 	self.browserCommunication={}
 	self.browserCommunication.newTab=data.newTab
 	self.browserCommunication.metadata=data.metadata
+	self.browserCommunication.download=data.download
 	self.hasinit=true
 	self:rebuild()
 end
@@ -1422,4 +1452,4 @@ page.draw=function(self,x,y)
 end
 
 page.hasinit=false
-return page,"2.0"
+return page,"2.1"

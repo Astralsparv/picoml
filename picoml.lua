@@ -1,4 +1,4 @@
---[[pod_format="raw",created="2025-11-28 15:29:10",modified="2025-11-30 19:19:46",revision=1129]]
+--[[pod_format="raw",created="2025-11-28 15:29:10",modified="2025-12-01 00:14:07",revision=1374]]
 local ffetch=fetch --replaced in :init() - ensures locality
 local webWarning=printh --replaced in :init() - ensures locality
 local pageDirty=false
@@ -45,71 +45,108 @@ local function textEntities(text)
 	return text
 end
 
-local function rPath(path,base)
-	local prot=""
-	if (path:prot()) then
-		return path
+--hell
+local function rPath(path, base)
+	base=base or baseurl
+	local prot = ""
+	
+	if (path:prot()) return path
+	
+	local basePath,baseQuery=base:match("^([^?]*)%??(.*)$")
+	local pathPart,query=path:match("^([^?]*)%??(.*)$")
+	if path:match("^%?") then
+		return basePath..path
 	end
-
-	if (base and base!="/") then
-		local baseProt=base:prot()
+	
+	local pathQuery=(query!="" and query) or nil
+	
+	if (basePath and basePath!="/") then
+		local baseProt = basePath:prot()
 		prot=baseProt and (baseProt.."://") or ""
-	
 		if (baseProt) then
-			base=base:sub(#prot + 1)
-		end
-	
-		if (base:sub(-1)=="/") then
-			base=base:sub(1,-2)
+			basePath=basePath:sub(#prot+1)
 		end
 		
-		if (base:ext()) then
-			base=base:sub(1,#base-#base:basename())
+		local last=basePath:match("[^/]+$")
+		if (last) then
+			last=last:match("^[^?]+")
+			if (last:ext()) then
+				basePath=basePath:sub(1,#basePath-#last)
+			end
 		end
-		base=base.."/"
-		path=base..path
+		
+		if (basePath:sub(-1)!="/") then
+			basePath..="/"
+		end
+		if (not (path:match("^/"))) then
+			pathPart=basePath..pathPart
+		end
 	end
+	
 	local segments = {}
-	for part in path:gmatch("[^/]+") do
+	for part in pathPart:gmatch("[^/]+") do
 		if (part=="..") then
 			if (#segments>0) then
 				table.remove(segments)
 			end
 		elseif (part!="." and part!="") then
-			add(segments, part)
+			table.insert(segments,part)
 		end
 	end
-	return prot..table.concat(segments, "/")
+	
+	pathPart=table.concat(segments, "/")
+	
+	local lastSegment=pathPart:match("[^/]+$") or ""
+	local isFile=(lastSegment:ext()!=nil)
+	local finalQuery=pathQuery or (isFile and baseQuery)
+	if (finalQuery and finalQuery!="") then
+		pathPart..="?"..finalQuery
+	end
+	return prot..pathPart
 end
+
+
 
 --resolved fetch, supports ../ and stuff
 local function rFetch(path)
-	if (path:prot()==nil) then
-		local rpath=rPath(path)
-		
-		local base=baseurl
-		if (baseurl:ext()!=nil) then
-			base=base:sub(1,#baseurl-#baseurl:basename())
-		end
-		return ffetch(base..rpath)
-	else
-		--it's a direct url
-		return ffetch(path)
-	end
+	return ffetch(rPath(path,baseurl))
+--	if (path:prot()==nil) then
+--		local rpath=rPath(path)
+--		
+--		local base=baseurl
+--		return ffetch(base..rpath)
+--	else
+--		--it's a direct url
+--		return ffetch(path)
+--	end
 end
 
-local function toImage(img)
+local function toImage(img,bg)
 	if (type(img)=="string") then
+		if (img:ext()=="png") then
+			img=fetch(img)
+			if (type(img)=="userdata") then
+				local ud=userdata("u8",img:width(),img:height())
+				local trg=get_draw_target()
+				set_draw_target(ud)
+				cls(32)
+				spr(img,0,0)
+				set_draw_target(trg)
+				return ud
+			else
+				return nil
+			end
+		end
 		local up=unpod(img)
-		if (up) then
-			img=up
+		if (type(up)=="userdata") return up
+		img=rFetch(img)
+		if (type(img)=="userdata") then
+			return img
 		else
-			img=rFetch(img)
-			if (type(img)=="string") img=nil
+			return nil
 		end
 	end
 	if (img==nil) return nil
-	local ud=userdata("u8",img:width(),img:height())
 	return img
 end
 
@@ -141,6 +178,20 @@ local function getMetadata(node)
 	return meta
 end
 
+local scripts={}
+
+local function initScripts()
+	for i=1, #scripts do
+		local ok,err=pcall(scripts[i].fn)
+		if (not ok) then
+			webWarning("Script runtime error: "..tostr(err))
+		else
+			sandboxedFunct("_init",scripts[i].env,false)
+		end
+	end
+	scripts={}
+end
+
 local function attachScript(src,env,self)
 	if (not scripting) return
 	if (env.__attachedScripts[src]) return
@@ -156,12 +207,7 @@ local function attachScript(src,env,self)
 		return
 	end
 	
-	local ok,err=pcall(fn)
-	if (not ok) then
-		webWarning("Script runtime error: "..tostr(err))
-	else
-		sandboxedFunct("_init",env,false)
-	end
+	add(scripts,{fn=fn,env=env})
 end
 
 local function getElementById(id)
@@ -211,8 +257,8 @@ local function editableElement(el)
 	return wrapper
 end
 
-local function pushElement(obj)
-	local obj,success,msg=page:pushElement(obj)
+local function pushElement(obj,data)
+	local obj,success,msg=page:pushElement(obj,data)
 	return editableElement(obj),success,msg
 end
 
@@ -227,12 +273,20 @@ local function openTab(url,replaceIndex)
 		url=url:sub(8,#url)
 		url="self/"..url
 	end
+	local path,query=url:match("([^?]*)%??(.*)")
+	
 	--redirect to main.picoml if nil
-	if (url:ext()==nil) then
-		if (url:sub(-1)!="/") url..="/"
-		url..="main.picoml"
+	local last=path:match("[^/]+$") or ""
+	if (last:ext()==nil) then
+		if (path:sub(-1)!="/") path..="/"
+		path..="main.picoml"
 	end
 	
+	if (query!="") then
+		url=path.."?"..query
+	else
+		url=path
+	end
 	local selff=false
 	if (type(replaceIndex)=="string") then
 		if (replaceIndex=="self") selff=true
@@ -243,15 +297,6 @@ end
 local function openRelativeTab(url,replaceIndex)
 	if (url:prot()==nil) then
 		url=rPath(url)
-		local base=baseurl
-		local lastSlash=base:match(".*/()")
-		if (lastSlash) then
-			local filename=base:sub(lastSlash)
-			if (filename:find("%.")) then
-				base=base:sub(1,lastSlash-1)
-			end
-		end
-		url=base..url
 	end
 	openTab(url,replaceIndex)
 end
@@ -495,7 +540,7 @@ local objectHandler={
 		
 		local pushbuild=true
 		x,y=builder.x,builder.y
-		local img=toImage(data.src)
+		local img=toImage(data.src,env.__background)
 		if (img) then
 			local w=data.width or img:width()
 			local h=data.height or img:height()
@@ -510,7 +555,6 @@ local objectHandler={
 				if (w>maxWidth) then
 					local scale = maxWidth / w
 					w=flr(w * scale)
-					h=flr(h * scale)
 				end
 			end
 			
@@ -524,7 +568,6 @@ local objectHandler={
 				if (h>maxHeight) then
 					local scale=maxHeight/h
 					h=flr(h*scale)
-					w=flr(w*scale)
 				end
 			end
 			
@@ -543,6 +586,8 @@ local objectHandler={
 			
 			return {
 				x=x,y=y,
+				csrc=data.src,
+				src=data.src,
 				img=img,
 				width=img:width(),height=img:height(),
 				hover=false,
@@ -551,16 +596,21 @@ local objectHandler={
 				end
 			},builder
 		else
-			webWarning("Failed to load image from source "..data.src,1)
+			webWarning("Failed to load image from source "..tostr(data.src),1)
+			return {
+				x=x,y=y,
+				width=0,0,
+				hover=false
+			},builder
 		end
 	end,
 	script=function(data,builder,pageData,env,x,y)
-		--delete on update
+		--delete on init
 		return {
 			x=0,y=0,
 			width=0,height=0,
 			src=data.src,
-			update=function(self)
+			init=function(self)
 				if (self.src) then
 					attachScript(self.src,env)
 				end
@@ -569,11 +619,11 @@ local objectHandler={
 		},builder
 	end,
 	comment=function(data,builder,pageData,env,x,y)
-		--delete on update, no purpose except commenting code for developers
+		--delete on init, no purpose except commenting code for developers
 		return {
 			x=0,y=0,
 			width=0,height=0,
-			update=function(self)
+			init=function(self)
 				destroyElement(self)
 			end
 		},builder
@@ -850,10 +900,12 @@ local function updatePage(self,page,cursorData)
 			if (page[i].update) callElementMethod(page[i],"update")
 			if (page[i]) then
 				if (#page>=i) then
-					if (page[i].x<=x and page[i].x+page[i].width>=x and page[i].y<=y and page[i].y+page[i].height>=y) then
-						el=page[i]
-					else
-						page[i].hover=false
+					if (page[i].x and page[i].y and page[i].width and page[i].height) then
+						if (page[i].x<=x and page[i].x+page[i].width>=x and page[i].y<=y and page[i].y+page[i].height>=y) then
+							el=page[i]
+						else
+							page[i].hover=false
+						end
 					end
 				end
 			end
@@ -1287,9 +1339,14 @@ page.getRawElementById = function(self, id)
 	return el
 end
 
-page.pushElement=function(self,obj)
+page.pushElement=function(self,obj,data)
 	if (type(obj)=="string") then
 		obj={type=obj}
+	end
+	if (data) then
+		for k,v in pairs(data) do
+			obj[k]=v
+		end
 	end
 	local obj,success,msg=append(obj,self.builtPage,self.pageBuilder,self.pageData,self.env,self)
 	return obj,success,msg
@@ -1381,6 +1438,23 @@ page.rebuild=function(self)
 	end
 	_,self.builtPage,self.meta,self.pageData.height=buildPage(self.builtPage,self.pageData,self.env,self)
 	self.browserCommunication.metadata(self.meta or {})
+	for i=1, #self.builtPage do
+		if (self.builtPage[i].init) self.builtPage[i]:init()
+	end
+end
+
+local function packQuery(query)
+	local result={}
+	for key,val in string.gmatch(query,"([^&=]+)=([^&=]+)") do
+		local num=tonumber(val)
+		if (num) then
+			result[key]=num
+		else
+			value=value:gsub('^"(.*)"$',"%1")
+			result[key]=val
+		end
+	end
+	return result
 end
 
 page.init=function(self,data)
@@ -1389,6 +1463,10 @@ page.init=function(self,data)
 	local _
 	webWarning=data.webWarning or printh
 	self.env=buildEnvironment(data.permissions,data,self.pageData)
+	rawset(self.env,"__url",baseurl)
+	local _,query=baseurl:match("^([^?]*)%??(.*)$")
+	rawset(self.env,"__query",query)
+	rawset(self.env,"__queries",packQuery(query))
 	self.pageData={width=0,height=0}
 	self:setDisplay(data.width,data.height,false)
 	ffetch=data.fetch
@@ -1401,11 +1479,13 @@ page.init=function(self,data)
 	self.browserCommunication.download=data.download
 	self.hasinit=true
 	self:rebuild()
+	initScripts()
 end
 
 page.update=function(self,data)
 	if (self.rippedPage==nil) return "404"
 	if (not self.hasinit) return {}
+	initScripts()
 	if (pageDirty) pageDirty=false self:rebuild()
 	local curs=data.mousedata
 	--ensure only affects if in page viewport
@@ -1452,4 +1532,4 @@ page.draw=function(self,x,y)
 end
 
 page.hasinit=false
-return page,"2.1"
+return page,"2.2"

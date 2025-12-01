@@ -1,4 +1,4 @@
---[[pod_format="raw",created="2025-11-28 15:29:10",modified="2025-12-01 18:18:16",revision=1395]]
+--[[pod_format="raw",created="2025-11-28 15:29:10",modified="2025-12-01 19:50:50",revision=1379]]
 local ffetch=fetch --replaced in :init() - ensures locality
 local webWarning=printh --replaced in :init() - ensures locality
 local pageDirty=false
@@ -408,18 +408,15 @@ local objectHandler={
 			rawtext=rawtext,
 			text=text,
 			color=col,
-			hovercolor=data.hovercolor or col,
 			hover=false,
 			underline=data.underline,
 			draw=function(self)
-				local c=self.color
-				if (self.hover) c=self.hovercolor
-				print(self.text,self.x,self.y,c)
+				print(self.text,self.x,self.y,self.color)
 				if (self.underline) then
 					if (not self.underlinecache) self.underlinecache=self.text:gsub("[^\n]","_")
-					print(self.underlinecache,self.x,self.y+2,c)
-					print(self.underlinecache,self.x,self.y+2,c)
-					print(self.underlinecache,self.x-1,self.y+2,c)
+					print(self.underlinecache,self.x,self.y+2,self.color)
+					print(self.underlinecache,self.x,self.y+2,self.color)
+					print(self.underlinecache,self.x-1,self.y+2,self.color)
 				end
 			end
 		},builder
@@ -442,23 +439,20 @@ local objectHandler={
 			rawtext=data.text,
 			text=text,
 			color=col,
-			hovercolor=data.hovercolor or col,
 			width=width,height=height,
 			hover=false,
 			underline=data.underline,
 			draw=function(self)
-				local c=self.color
-				if (self.hover) c=self.hovercolor
-				print("\^p"..self.text,self.x,self.y,c)
-				print("\^p"..self.text,self.x,self.y+1,c)
-				print("\^p"..self.text,self.x+1,self.y,c)
-				print("\^p"..self.text,self.x+1,self.y+1,c)
+				print("\^p"..self.text,self.x,self.y,self.color)
+				print("\^p"..self.text,self.x,self.y+1,self.color)
+				print("\^p"..self.text,self.x+1,self.y,self.color)
+				print("\^p"..self.text,self.x+1,self.y+1,self.color)
 				if (self.underline) then
 					if (not self.underlinecache) self.underlinecache=self.text:gsub("[^\n]","_")
-					print("\^p"..self.underlinecache,self.x,self.y+4,c)
-					print("\^p"..self.underlinecache,self.x-1,self.y+4,c)
-					print("\^p"..self.underlinecache,self.x-2,self.y+4,c)
-					print("\^p"..self.underlinecache,self.x-3,self.y+4,c)
+					print("\^p"..self.underlinecache,self.x,self.y+4,self.color)
+					print("\^p"..self.underlinecache,self.x-1,self.y+4,self.color)
+					print("\^p"..self.underlinecache,self.x-2,self.y+4,self.color)
+					print("\^p"..self.underlinecache,self.x-3,self.y+4,self.color)
 				end
 			end
 		},builder
@@ -474,6 +468,7 @@ local objectHandler={
 		if (pushbuild) then
 			builder.y+=data.margin_top+height+data.margin_bottom
 		end
+		local hovercol=data.hovercolor or 1
 		x,y=applyAlignment(data.align,x,y,width,height,pageData)
 		x,y=applyMargin(data,x,y)
 		local leftmouseclick=[[openTab(self.target,self.where)]]
@@ -487,7 +482,7 @@ local objectHandler={
 			rawtext=rawtext,
 			text=text,
 			color=col,
-			hovercolor=data.hovercolor or 1,
+			hovercol=hovercol,
 			target=data.target or "self://404",
 			where=data.where or "new",
 			hover=false,
@@ -495,7 +490,9 @@ local objectHandler={
 			method=data.method or "link",
 			draw=function(self)
 				local c=self.color
-				if (self.hover) c=self.hovercolor
+				if (self.hover) then
+					c=self.hovercol
+				end
 				print(self.text,self.x,self.y,c)
 				if (self.underline) then
 					if (not self.underlinecache) self.underlinecache=self.text:gsub("[^\n]","_")
@@ -525,13 +522,10 @@ local objectHandler={
 			rawtext=rawtext,
 			text=text,
 			color=col,
-			hovercolor=data.hovercolor or col,
 			width=width,height=height,
 			hover=false,
 			underline=data.underline,
 			draw=function(self)
-				local c=self.color
-				if (self.hover) c=self.hovercolor
 				print("\014"..self.text,self.x,self.y,self.color)
 				if (self.underline) then
 					if (not self.underlinecache) self.underlinecache=self.text:gsub("[^ \n]","_")
@@ -1413,7 +1407,7 @@ page.cleanRip=function(self,url)
 		if (rip[i].src) rip[i].src=rPath(rip[i].src,start)
 		if (rip[i].target) rip[i].target=rPath(rip[i].target,start)
 	end
-	return rip,url
+	return rip,meta,url
 end
 
 --cleanRip + metadata
@@ -1424,6 +1418,7 @@ page.extensiveRip=function(self,url)
 	if (start:ext()!=nil) then
 		start=start:sub(1,#start-#start:basename())
 	end
+	local meta={}
 	--clean form which localises src and target
 	for i=1, #rip do
 		if (rip[i].src) rip[i].src=rPath(rip[i].src,start)
@@ -1538,4 +1533,4 @@ page.draw=function(self,x,y)
 end
 
 page.hasinit=false
-return page,"2.2"
+return page,"2.2.1"

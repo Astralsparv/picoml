@@ -1,4 +1,3 @@
---[[pod_format="raw",created="2025-11-28 15:29:10",modified="2025-12-01 19:50:50",revision=1379]]
 local ffetch=fetch --replaced in :init() - ensures locality
 local webWarning=printh --replaced in :init() - ensures locality
 local pageDirty=false
@@ -1451,7 +1450,7 @@ local function packQuery(query)
 		if (num) then
 			result[key]=num
 		else
-			value=value:gsub('^"(.*)"$',"%1")
+			val=val:gsub('^"(.*)"$',"%1")
 			result[key]=val
 		end
 	end
@@ -1533,4 +1532,4 @@ page.draw=function(self,x,y)
 end
 
 page.hasinit=false
-return page,"2.2.1"
+return page,"2.2.2"

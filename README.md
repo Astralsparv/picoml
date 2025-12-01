@@ -19,20 +19,21 @@ local page=include("picoml.lua")
 ```
 
 With this, you have an empty page and access to the following functions:
-    init()
-    update()
-    draw()
-    setDisplay()
-    rebuild()
+```
+init()
+update()
+draw()
+setDisplay()
+rebuild()
 
-    rip()
-    cleanRip()
-    extensiveRip()
-
+rip()
+cleanRip()
+extensiveRip()
+```
 ## Building, updating and drawing a page
 
-### Creating the page object
-For this example, we will be using the PicoLoco page & a 480x270 screen.
+### >Creating the page object
+For this example, we will be using the PicoLoco page, & a 480x270 screen.
 
 Creating a page looks like this:
 ```
@@ -141,7 +142,7 @@ attachScripts
 networking
 ```
 
-### Updating the page
+### >Updating the page
 
 Updating the page is as simple as calling ```page:update()```
 Though, for the cursor to be fed through to the page - you must format the cursor data.
@@ -183,7 +184,7 @@ window{cursor=data.cursorSprite}
 to update a page, sending mouse data & receiving a cursor sprite.
 
 
-### Drawing the page
+### >Drawing the page
 
 To then draw the page, you can receive a userdata u8 image of the page with ```page:draw()```
 This can be done with:
@@ -194,7 +195,7 @@ where x,y is the coordinates of where you want to draw the page in your applicat
 
 ## Ensuring the page builds correctly
 
-### Resetting the display
+### >Resetting the display
 
 If your application is windowed, or the page itself can be resized - you will need to call ```page:setDisplay(width,height)``` to re-adjust the page.
 
@@ -211,34 +212,34 @@ if (windowData.width!=lastw or windowData.height!=lasth) then --compare the new 
 end
 ```
 
-## Extras
+## >Extras
 
 You can rebuild pages with ```page:rebuild()```, causing the page to be fully rebuilt (occurs when setDisplay() and init() is called, alongside any update to the page's DOM) for whatever reason you need.
 
 # Ripping pages
 
-## Preparing
+## >Preparing
 Create the page object with
 ```
 local page=include("picoml.lua")
 ```
 All forms of ripping has the last return variable of a url - returning a clean form of the url (e.g: example.com to example.com/main.picoml)
 
-## Basic ripping
+## >Basic ripping
 For a raw pod of the page, you can use basic ripping.
 You can get a rip of any page using:
 ```
 local data,cleanurl=page:rip(url)
 ```
 
-## Clean ripping
+## >Clean ripping
 For a cleaner pod of the page, you can use clean ripping.
 As of PicoML 2.2, this makes all urls in "src" and "target" properties absolute - replacing relative paths with their absolute form.
 ```
 local data,cleanurl=page:cleanRip(url)
 ```
 
-## Extensive ripping
+## >Extensive ripping
 Extensive ripping is identical to clean ripping with the bonus of also processing metadata.
 You can receive the information with
 ```

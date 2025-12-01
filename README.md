@@ -282,9 +282,11 @@ You can create a page by pairing these objects together, as seen:
 Images can be added into PicoML with the `image` object.
 
 Images are either:
-    png
-    userdata u8 images
-    podded image (what you get when you copy a sprite in the GFX editor)
+
+- png
+- userdata u8 images
+- podded image (what you get when you copy a sprite in the GFX editor)
+
 To set the source of an image, you use the attribute `src`.
 
 For example, setting an image to be a png image:
@@ -300,26 +302,28 @@ Setting a podded image would be as such:
 
 ### > Image Attributes:
 
-`src` - Source of the image (as seen above)
-
-`width` - width (px)
-
-`height` - height (px)
+```lua
+src -- Source of the image (as seen above)
+width -- width (px)
+height -- height (px)
+```
 
 ## Metadata
 
 Metadata is used to share information about your page.
 As of PML v2.2, officially supported metadata is:
-```
-title - string, title of the page, displayed in the tab
-description - string, description of the page, arbritrary use
-author - string, creator/writer of the page, arbritrary use
+
+```lua
+title --string, title of the page, displayed in the tab
+description --string, description of the page, arbritrary use
+author --string, creator/writer of the page, arbritrary use
 ```
 
 Metadata is added to your page with the `metadata` object.
 Each piece of information in the metadata is added with an attribute.
 
-This can be seen through
+Example:
+
 ```html
 <metadata title="My PicoML Page" description="The amazing page for the README.md" author="Shopping Cart"></metadata>
 ```
@@ -331,40 +335,34 @@ Custom color palettes are typically unsupported - but theoretically possible (in
 
 ### > General Attributes:
 
-`align` - `left`, `center` or `right` - alignment of the object
-
-`cursor` - `cursorsprite` - the cursor to use when hovering over this object
+```lua
+align -- left, center or right - alignment of the object
+cursor -- cursorsprite - the cursor to use when hovering over this object
+```
 
 ### > Event Attributes:
 
-`leftmousedown`
+```lua
+leftmousedown
+leftmouseclick
+leftmouseunpress
 
-`leftmouseclick`
-
-`leftmouseunpress`
-
-
-`rightmousedown`
-
-`rightmouseclick`
-
-`rightmouseunpress`
+rightmousedown
+rightmouseclick
+rightmouseunpress
 
 
-`middlemousedown`
+middlemousedown
+middlemouseclick
+middlemouseunpress
 
-`middlemouseclick`
+wheelx
+wheely
 
-`middlemouseunpress`
-
-
-`wheelx`
-
-`wheely`
-
-The following attributes are run:
-`update` - alongside _update()
-`draw` - alongside _draw()
+--These attributes are run immediately after their parent methods:
+update --immediately after _update()
+draw --immediately after _draw()
+```
 
 ## Text objects
 There are four types of text objects:
@@ -432,9 +430,9 @@ PicoML scripts use the `.lua` extension.
 
 Scripts run in a sandboxed setting with access to functions based on what the user permits.
 
-(browsers are able to set permissions for a page, a good browser should allow the user to edit these permissions in some way.)
+(Browsers are able to set permissions for a page. A good browser should allow the user to edit these permissions in some way.)
 
-It is impossible to access the filesystem of a user, with fetch() being limited to only being online.
+It is impossible to access the filesystem of a user, with `fetch()` being limited to only being online.
 
 ## Manipulating the DOM
 

@@ -1,4 +1,4 @@
---[[pod_format="raw",created="2025-11-28 15:29:10",modified="2025-12-01 13:03:04",revision=1379]]
+--[[pod_format="raw",created="2025-11-28 15:29:10",modified="2025-12-01 18:18:16",revision=1395]]
 local ffetch=fetch --replaced in :init() - ensures locality
 local webWarning=printh --replaced in :init() - ensures locality
 local pageDirty=false
@@ -408,15 +408,18 @@ local objectHandler={
 			rawtext=rawtext,
 			text=text,
 			color=col,
+			hovercolor=data.hovercolor or col,
 			hover=false,
 			underline=data.underline,
 			draw=function(self)
-				print(self.text,self.x,self.y,self.color)
+				local c=self.color
+				if (self.hover) c=self.hovercolor
+				print(self.text,self.x,self.y,c)
 				if (self.underline) then
 					if (not self.underlinecache) self.underlinecache=self.text:gsub("[^\n]","_")
-					print(self.underlinecache,self.x,self.y+2,self.color)
-					print(self.underlinecache,self.x,self.y+2,self.color)
-					print(self.underlinecache,self.x-1,self.y+2,self.color)
+					print(self.underlinecache,self.x,self.y+2,c)
+					print(self.underlinecache,self.x,self.y+2,c)
+					print(self.underlinecache,self.x-1,self.y+2,c)
 				end
 			end
 		},builder
@@ -439,20 +442,23 @@ local objectHandler={
 			rawtext=data.text,
 			text=text,
 			color=col,
+			hovercolor=data.hovercolor or col,
 			width=width,height=height,
 			hover=false,
 			underline=data.underline,
 			draw=function(self)
-				print("\^p"..self.text,self.x,self.y,self.color)
-				print("\^p"..self.text,self.x,self.y+1,self.color)
-				print("\^p"..self.text,self.x+1,self.y,self.color)
-				print("\^p"..self.text,self.x+1,self.y+1,self.color)
+				local c=self.color
+				if (self.hover) c=self.hovercolor
+				print("\^p"..self.text,self.x,self.y,c)
+				print("\^p"..self.text,self.x,self.y+1,c)
+				print("\^p"..self.text,self.x+1,self.y,c)
+				print("\^p"..self.text,self.x+1,self.y+1,c)
 				if (self.underline) then
 					if (not self.underlinecache) self.underlinecache=self.text:gsub("[^\n]","_")
-					print("\^p"..self.underlinecache,self.x,self.y+4,self.color)
-					print("\^p"..self.underlinecache,self.x-1,self.y+4,self.color)
-					print("\^p"..self.underlinecache,self.x-2,self.y+4,self.color)
-					print("\^p"..self.underlinecache,self.x-3,self.y+4,self.color)
+					print("\^p"..self.underlinecache,self.x,self.y+4,c)
+					print("\^p"..self.underlinecache,self.x-1,self.y+4,c)
+					print("\^p"..self.underlinecache,self.x-2,self.y+4,c)
+					print("\^p"..self.underlinecache,self.x-3,self.y+4,c)
 				end
 			end
 		},builder
@@ -468,7 +474,6 @@ local objectHandler={
 		if (pushbuild) then
 			builder.y+=data.margin_top+height+data.margin_bottom
 		end
-		local hovercol=data.hovercolor or 1
 		x,y=applyAlignment(data.align,x,y,width,height,pageData)
 		x,y=applyMargin(data,x,y)
 		local leftmouseclick=[[openTab(self.target,self.where)]]
@@ -482,7 +487,7 @@ local objectHandler={
 			rawtext=rawtext,
 			text=text,
 			color=col,
-			hovercol=hovercol,
+			hovercolor=data.hovercolor or 1,
 			target=data.target or "self://404",
 			where=data.where or "new",
 			hover=false,
@@ -490,9 +495,7 @@ local objectHandler={
 			method=data.method or "link",
 			draw=function(self)
 				local c=self.color
-				if (self.hover) then
-					c=self.hovercol
-				end
+				if (self.hover) c=self.hovercolor
 				print(self.text,self.x,self.y,c)
 				if (self.underline) then
 					if (not self.underlinecache) self.underlinecache=self.text:gsub("[^\n]","_")
@@ -522,10 +525,13 @@ local objectHandler={
 			rawtext=rawtext,
 			text=text,
 			color=col,
+			hovercolor=data.hovercolor or col,
 			width=width,height=height,
 			hover=false,
 			underline=data.underline,
 			draw=function(self)
+				local c=self.color
+				if (self.hover) c=self.hovercolor
 				print("\014"..self.text,self.x,self.y,self.color)
 				if (self.underline) then
 					if (not self.underlinecache) self.underlinecache=self.text:gsub("[^ \n]","_")
@@ -1532,4 +1538,4 @@ page.draw=function(self,x,y)
 end
 
 page.hasinit=false
-return page,"2.2.1"
+return page,"2.2"

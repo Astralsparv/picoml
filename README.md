@@ -489,26 +489,26 @@ text:set("text","Hello world")
 
 ## System Variables
 
-All system variables are suffixed by `__`
+All system variables are prefixed by `__`
 
 These are system variables you have access to:
 
-```
-cursorSprite - the sprite of the cursor
-mousedata - mouse's data, e.g: positioning and x,y
-url - the active page's url
-query - the active page's query (?apple=2&grape=4)
-queries - the active page's query formatted in a table
+```lua
+__cursorSprite --the sprite of the cursor
+__mousedata --mouse's data, e.g: positioning and x,y
+__url --the active page's url
+__query --the active page's query (?apple=2&grape=4)
+__queries --the active page's query formatted in a table
 
-background - the page background color
-scroll - how far the page has scrolled (x=x,y=y)
+__background --the page background color
+__scroll --how far the page has scrolled (x=x,y=y)
 
-invertScrollX - whether to invert scrolling on the x axis
-invertScrollY - whether to invert scrolling on the y axis
-lastCursorData - mousedata of the previous frame
-scrollSpeed - speed of scrolling
-pageData - page information (width=width, height=height)
-viewport - viewport proportions (width=width, height=height)
+__invertScrollX --whether to invert scrolling on the x axis
+__invertScrollY --whether to invert scrolling on the y axis
+__lastCursorData --mousedata of the previous frame
+__scrollSpeed --speed of scrolling
+__pageData --page information (width=width, height=height)
+__viewport --viewport proportions (width=width, height=height)
 ```
 
 ## Built in functions

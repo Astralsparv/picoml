@@ -563,3 +563,9 @@ openTab("?q="..packQuery(query),"self")
 ```lua
 unpackQuery(query) --unpacks a query
 ```
+
+## Development Tools
+
+Since PicoML is based on Picotron Lua, standard Lua language servers and toolkits will display some incorrect warnings and syntax errors.
+
+A [PICO-8 language server](https://github.com/japhib/pico8-ls) is available from Pollywog Games that includes support for the PICO-8 Lua dialect, which provides enough similarity to Picotron Lua (and by extension PicoML) to be useful here as well. Visual Studio Code users can search for the extension `pollywoggames.pico8-ls`.

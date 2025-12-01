@@ -510,3 +510,56 @@ scrollSpeed - speed of scrolling
 pageData - page information (width=width, height=height)
 viewport - viewport proportions (width=width, height=height)
 ```
+
+## Built in functions
+
+### > Permission `attachScripts`
+
+```lua
+attachScripts(filepath) --attach a script
+```
+
+### > Permission `openPages`
+
+```lua
+openTab(url,["self","new"]) --open a tab
+```
+
+```lua
+download(filedata/fileurl,filename) --download a file
+```
+
+### > Permission `debug`
+
+```lua
+webWarning(message) --send a warning
+webwarn(message) --send a warning
+webWarn(message) --send a warning
+warn(message) --send a warning
+```
+
+### > Permission `dom`
+
+```lua
+getElementById(id) --get an element in the DOM
+```
+
+```lua
+destroyElement(id) --destroy an element in the DOM
+```
+
+```lua
+pushElement(tag,[optional extra data]) --create an element
+```
+
+### > No permission needed
+
+```lua
+packQuery(data) --does not support nested tables, packs & encodes a query url
+--e.g:
+openTab("?q="..packQuery(query),"self")
+```
+
+```lua
+unpackQuery(query) --unpacks a query
+```

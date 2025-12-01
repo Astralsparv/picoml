@@ -1250,8 +1250,18 @@ local permittedFunctions={
 		}
 	},
 	networking={
-		socket=socket
+		name="Networking",
+		description="Sockets",
+		risk=3,
+		functions={
+			socket=socket
+		}
 	}
+}
+
+local alwaysAllowedFunctions={
+	packQuery=packQuery,
+	unpackQuery=unpackQuery
 }
 
 local function loadPermissions(environment,allowed)
@@ -1261,6 +1271,10 @@ local function loadPermissions(environment,allowed)
 				environment[key]=val
 			end
 		end
+	end
+	--always allowed
+	for key,val in pairs(alwaysAllowedFunctions) do
+		environment[key]=val
 	end
 	return environment
 end
@@ -1443,18 +1457,44 @@ page.rebuild=function(self)
 	end
 end
 
-local function packQuery(query)
-	local result={}
-	for key,val in string.gmatch(query,"([^&=]+)=([^&=]+)") do
-		local num=tonumber(val)
-		if (num) then
-			result[key]=num
-		else
-			val=val:gsub('^"(.*)"$',"%1")
-			result[key]=val
+function packQuery(str) --does not support nested tables
+	if (type(str)=="table") then
+		local res=""
+		for k,v in pairs(str) do
+			res..=packQuery(k).."="..packQuery(v).."&"
+		end
+		if (res:sub(-1)=="&") res=res:sub(1,#res-1)
+		return res
+	elseif (type(str)!="string") then
+		str=tostr(str) --is this the right thing to do?
+	end
+	return (str:gsub("([^A-Za-z0-9%-_%.~])", function(c)
+		return string.format("%%%02X", string.byte(c))
+	end))
+end
+
+function unpackQuery(str)
+	local res={}
+	
+	for pair in string.gmatch(str,"([^&]+)") do
+		local key,val=pair:match("([^=]+)=?(.*)")
+		if (key and val) then
+			key=key:gsub("+"," "):gsub("%%(%x%x)", function(h)
+				return string.char(tonumber(h,16))
+			end)
+			val=val:gsub("+"," "):gsub("%%(%x%x)", function(h)
+				return string.char(tonumber(h,16))
+			end)
+			local num=tonumber(val)
+			if num then
+				res[key]=num
+			else
+				res[key]=val
+			end
 		end
 	end
-	return result
+	
+	return res
 end
 
 page.init=function(self,data)
@@ -1466,7 +1506,7 @@ page.init=function(self,data)
 	rawset(self.env,"__url",baseurl)
 	local _,query=baseurl:match("^([^?]*)%??(.*)$")
 	rawset(self.env,"__query",query)
-	rawset(self.env,"__queries",packQuery(query))
+	rawset(self.env,"__queries",unpackQuery(query))
 	self.pageData={width=0,height=0}
 	self:setDisplay(data.width,data.height,false)
 	ffetch=data.fetch

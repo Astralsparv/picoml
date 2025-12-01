@@ -1,4 +1,4 @@
---[[pod_format="raw",created="2025-11-28 15:29:10",modified="2025-12-01 00:14:07",revision=1374]]
+--[[pod_format="raw",created="2025-11-28 15:29:10",modified="2025-12-01 13:03:04",revision=1379]]
 local ffetch=fetch --replaced in :init() - ensures locality
 local webWarning=printh --replaced in :init() - ensures locality
 local pageDirty=false
@@ -1407,7 +1407,7 @@ page.cleanRip=function(self,url)
 		if (rip[i].src) rip[i].src=rPath(rip[i].src,start)
 		if (rip[i].target) rip[i].target=rPath(rip[i].target,start)
 	end
-	return rip,meta,url
+	return rip,url
 end
 
 --cleanRip + metadata
@@ -1532,4 +1532,4 @@ page.draw=function(self,x,y)
 end
 
 page.hasinit=false
-return page,"2.2"
+return page,"2.2.1"

@@ -1,6 +1,6 @@
 # PicoML Library
 
-## What is it for?
+## What is PicoML for?
 
 PicoML is a web language, similar to HTML, intended for the Picotron web.
 This library is designed in Picotron Lua (a modified form of Lua 5.4)
@@ -8,6 +8,7 @@ This library is designed in Picotron Lua (a modified form of Lua 5.4)
 ## Use cases
 
 The PicoML library can be used for implementing support for browsers, e.g: the official [PicoML Browser](https://www.lexaloffle.com/bbs/?tid=152762), creating search engines, e.g: [PicoLoco](https://github.com/Astralsparv/picoloco).
+General PicoML can be used to make webpages.
 
 # How to use it
 
@@ -335,6 +336,10 @@ Custom color palettes are typically unsupported - but theoretically possible (in
 
 `cursor` - `cursorsprite` - the cursor to use when hovering over this object
 
+`class` - the class name of an element, used for styling & scripting
+
+`id` - the id name of an element, used for styling & scripting
+
 ### > Event Attributes:
 
 `leftmousedown`
@@ -412,19 +417,215 @@ An input object is simply a one-line text input.
 
 `tab` - function to be called when the user presses TAB
 
+## Canvas
+
+The `canvas` element is a canvas used in scripting.
+It has a screen being the full width & height of it's element which defaults to a black screen
+See the canvas scripting section for how to use it.
+
 ## Scripting
 
 Scripts can be added with the `script` object.
 
 Scripts have only one attribute, `src`, which is the filepath/url to a `lua` file.
 
+## Styling
+
+You can add styling with the `style` object.
+
+Styling have only one attribute, `src`, which is the filepath/url to a `style` file.
+
 ## Other objects
 
 You can use the `comment` object to write comments in your PicoML code, this is deleted when the page is built automatically.
 
-## Using lua with PicoML
+# Creating style files for PicoML
 
-## File types
+## File type
+
+PicoML style files use the `.style` extension.
+
+## Structure
+
+
+Style files are written in the structure of:
+
+```
+label
+{
+properties
+}
+```
+
+## Labels
+
+The labels allow you to define:
+
+```
+system styling (currently just background)
+element styling (global element properties)
+class styling (any object with this class name)
+id styling (the object with this id)
+```
+
+### > System
+
+System styling is done by prefixing the label with `__`, these are hard coded to exist.
+Leaving the label blank is the same as editing `__page`.
+e.g:
+
+
+```
+{
+background=7
+}
+```
+
+or
+
+```
+__page
+{
+background=7
+}
+```
+
+`__page` (or lack of a label) is the only way to edit the background of the page.
+
+### > Elements
+
+Elements can be styled by simply naming the element in the label.
+
+For example, the element `<text>` can be formatted with:
+
+```
+text
+{
+underline=true
+}
+```
+
+This affects *all* `text` elements automatically.
+
+### > Classes
+
+Classes can by styled by naming the class, and prefixing it with a `.`
+
+For example, the class named "blue" can be styled with:
+
+
+```
+.blue
+{
+color=12
+}
+```
+
+Any element with the class property being "blue" causes it to take the properties of this class, e.g:
+
+```html
+<text class="blue">I'm blue!</text>
+```
+
+It does not affect anything other than elements with the `blue` class, and can be used on any type of object.
+
+Within elements, you can have multiple classes seperated by spaces, e.g:
+
+
+```html
+<text class="blue p8"></text>
+```
+
+```
+p8
+{
+font=2
+}
+```
+
+This text object would take the properties from both `blue` and `p8`.
+
+### > IDs
+
+IDs can by styled by naming the id, and prefixing it with a `#`
+
+For example, the id named "important" can be styled with:
+
+
+```
+#important
+{
+color=8
+underline=true
+}
+```
+
+The element with the id `important` causes it to take the properties of the styling defined, e.g:
+
+```html
+<text id="important">IMPORTANT: PLEASE READ</text>
+```
+
+It does not affect anything other than the element with the id `important`.
+
+## Properties
+
+Properties are defined in the `key=value` structure, identical to how you'd write it for inline properties.
+
+For example, setting the color blue (color index 12) for a text object is done with
+
+```
+color=12
+```
+
+## Openers/Closers, Curly Braces
+
+The curly braces `{}` are used for opening, `{`, and closing, `}`.
+
+The opening brace, `{`, is used right after the label, marking the start of writing properties.
+
+The closing brace, `}`, is used at the end of writing your properties, causing the styling properties to be saved and implemented
+
+## Priority
+
+Styling priorities (lower number takes priority) are as followed:
+
+
+```
+0 inline text (in the tag)
+1 id
+2 class
+3 element
+```
+
+If something has a higher priority and has a property (e.g: color) that a lower priority property also has, the higher priority property takes presedence.
+
+For example:
+
+```html
+<text id="grape" class="apple"></text>
+```
+
+```
+#grape
+{
+color=18
+}
+
+.apple
+{
+color=8
+font=2
+}
+```
+
+The `apple` class attempts to set the `text` element to be red (8), but as there is inline stlying (highest priority), the color is set to what the id, being purple (18), as it is higher priority.
+
+Because there is no higher priority styling that has a `font` property, the `text` element takes the font from the class `apple`.
+
+# Using lua with PicoML
+
+## File type
 
 PicoML scripts use the `.lua` extension.
 
@@ -434,57 +635,104 @@ Scripts run in a sandboxed setting with access to functions based on what the us
 
 (browsers are able to set permissions for a page, a good browser should allow the user to edit these permissions in some way.)
 
-It is impossible to access the filesystem of a user, with fetch() being limited to only being online.
+It is impossible to access the filesystem of a user, with `fetch()` being limited to only being online.
 
 ## Manipulating the DOM
 
-### > Fetching objects
+### > Fetching elements
 
-You can fetch objects in the page by their id, using:
+You can fetch elements in the page by their id, using:
 
 ```lua
-local object=getElementById("id")
+local element=dom.getElementById("id")
 ```
 
-You can then use these however you please.
-
-### > Modifying object properties
-
-With an object, you can use:
-
+You can get a table of the full DOM of the page using:
 ```lua
-object:set(property,value)
+local DOM=dom.get()
 ```
 
-to set an object's property, e.g:
-
+You can get a table of elements by class name using:
 ```lua
-object:set("text","Hello world!")
+local elements=dom.getElementsByClassName("class")
 ```
 
-### > Reading object properties
+### > Modifying element properties
 
-With an object, you can simply use
+With an element, you can use:
 
 ```lua
-object.property
+element:set(property,value)
+```
+
+to set an element's property, e.g:
+
+```lua
+element:set("text","Hello world!")
+```
+
+You can move elements within the DOM using
+
+```
+dom.moveElementAbove(movingElementID,elementID)
+```
+
+```
+dom.moveElementBelow(movingElementID,elementID)
+```
+
+allowing you to dynamically change the DOM's structure.
+
+### > Reading element properties
+
+With an element, you can simply use
+
+```lua
+element.property
 ```
 
 to read its property.
 
-### > Creating objects
+### > Creating element
 
 You can push an object to the page using
 
 ```lua
-pushElement(object type,[optional properties])
+dom.pushElement(element type,[optional properties])
 ```
 
 This can be used as seen:
 
 ```lua
-local text=pushElement("text")
+local text=dom.pushElement("text")
 text:set("text","Hello world")
+```
+
+The following functions can also be used to create & position the element between other elements.
+
+```lua
+dom.pushElementAbove(element type,element to be above,[optional properties])
+```
+
+```lua
+dom.pushElementBelow(element type,element to be below,[optional properties])
+```
+
+## Canvas
+
+The `canvas` object allows you to create a screen that you can draw to cleanly.
+You can use a canvas as such:
+
+```lua
+local canvas=dom.getElementById("canvas")
+canvas:resize(50,50) -- set the proportions to 50x50 (also automatically cls on resize)
+
+function _draw()
+    dom.canvas.enter(canvas) -- makes any draw functions apply to the canvas
+    cls(14)
+    print("Hi!",0,0,7)
+    dom.canvas.exit() -- exits the canvas so draw functions apply to the page
+end
 ```
 
 ## System Variables
@@ -500,7 +748,6 @@ url - the active page's url
 query - the active page's query (?apple=2&grape=4)
 queries - the active page's query formatted in a table
 
-background - the page background color
 scroll - how far the page has scrolled (x=x,y=y)
 
 invertScrollX - whether to invert scrolling on the x axis
@@ -509,27 +756,32 @@ lastCursorData - mousedata of the previous frame
 scrollSpeed - speed of scrolling
 pageData - page information (width=width, height=height)
 viewport - viewport proportions (width=width, height=height)
+styling - styling data (system styling, elements, classes & ids)
 ```
 
 ## Built in functions
 
-### > Permission `attachScripts`
+### > Attaching files
 
 ```lua
-attachScripts(filepath) --attach a script
-```
-
-### > Permission `openPages`
-
-```lua
-openTab(url,["self","new"]) --open a tab
+attach.scripts(filepath) --attach a .lua file
 ```
 
 ```lua
-download(filedata/fileurl,filename) --download a file
+attach.styling(filepath) --attach a .style file
 ```
 
-### > Permission `debug`
+### > Opening files
+
+```lua
+file.openPage(url,["self","new"]) --open a new page
+```
+
+```lua
+file.download(filedata/fileurl,filename) --download a file
+```
+
+### > Debugging
 
 ```lua
 webWarning(message) --send a warning
@@ -538,28 +790,64 @@ webWarn(message) --send a warning
 warn(message) --send a warning
 ```
 
-### > Permission `dom`
+### > DOM
 
 ```lua
-getElementById(id) --get an element in the DOM
+dom.getElementById(id) --get an element in the DOM by the ID
 ```
 
 ```lua
-destroyElement(id) --destroy an element in the DOM
+dom.getElementsByClassName(class) --get multiple elements in the DOM by the class
 ```
 
 ```lua
-pushElement(tag,[optional extra data]) --create an element
-```
-
-### > No permission needed
-
-```lua
-packQuery(data) --does not support nested tables, packs & encodes a query url
---e.g:
-openTab("?q="..packQuery(query),"self")
+dom.destroyElement(id) --destroy an element in the DOM
 ```
 
 ```lua
-unpackQuery(query) --unpacks a query
+dom.pushElement(tag,[optional extra data]) --create an element at the bottom of the page
+dom.pushElementAbove(tag,id,[optional extra data]) --create an element above element with id
+dom.pushElementBelow(tag,id,[optional extra data]) --create an element below element with id
+```
+
+```lua
+dom.moveElementAbove(moving,still,[optional extra data]) --move an element (moving) above an element (still) where each are ids
+dom.moveElementBelow(moving,still,[optional extra data]) --move an element (moving) below an element (still) where each are ids
+```
+
+```lua
+dom.setStyle(label,properties,[replace]) --allows you to change styling during runtime
+--label is defined the same as written in .style
+--properties is a table of key=value properties
+--[replace] is an optional value that deletes all previous styling properties and replaces it with the given properties
+```
+
+> Canvas
+
+```lua
+dom.canvas.enter(canvasObject) --draw functions go to the canvas screen
+```
+
+```lua
+dom.canvas.exit() --exit the canvas screen, draw functions go back to the page
+```
+
+### > Query
+
+```lua
+query.pack(table,string) --does not support nested tables, packs & encodes a query url
+```
+
+```lua
+query.unpack(query) --unpacks a query
+```
+
+### > Local Storage
+
+```lua
+localStorage.store(table,filename) --store pods in storage
+```
+
+```lua
+localStorage.fetch(filename) --fetch pods in storage
 ```

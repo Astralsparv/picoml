@@ -5,43 +5,29 @@ local buildingPage=false
 
 local scripting=false
 
+local fonts={
+	{width=5,height=10}, --pt
+	{width=4,height=6}   --p8
+}
+
+local rootFolder="/appdata/picoml/"
+local localStorageFolder=rootFolder.."localStorage/"
+local sharedStorageFolder=rootFolder.."sharedStorage/"
+mkdir(rootFolder)
+mkdir(localStorageFolder)
+mkdir(sharedStorageFolder)
 local baseurl
 local page={}
---sandbox functs
 
-local function sandboxedFunct(funct,safe_env,nilerror)
-	if (nilerror==nil) nilerror=true
-	if safe_env and type(safe_env[funct]) == "function" then
-		local ok, err = pcall(safe_env[funct],safe_env)
-		if not ok then
-			webWarning(funct.."() error: " .. tostring(err))
-		end
-	elseif (nilerror) then
-		webWarning(funct.." not found")
+local function cleanURL(url)
+	local url,_=url:match("([^?]*)%??(.*)")
+	url=url:sub(#url:prot()+4,#url)
+	local rem="/main.picoml"
+	if (url:sub(#url-#rem+1,#url)==rem) then
+		url=url:sub(1,#url-#rem)
 	end
-end
-
---helper
-local function swapCase(txt)
-	txt=txt:gsub("%a", function(c)
-		if c:match("%l") then
-			return c:upper()
-		else
-			return c:lower()
-		end
-	end)
-	return txt
-end
-
---hell
-local function textEntities(text)
-	text=text:gsub("&lt;","<")
-	text=text:gsub("&gt;",">")
-	text=text:gsub("&amp;","&")
-	text=text:gsub("&quot;",'"')
-	text=text:gsub("&apos;","'")
-	text=text:gsub("&nbsp;","")
-	return text
+	local sectors=url:split("/")
+	return sectors[1] or url
 end
 
 --hell
@@ -104,26 +90,177 @@ local function rPath(path, base)
 	return prot..pathPart
 end
 
-
-
 --resolved fetch, supports ../ and stuff
 local function rFetch(path)
 	return ffetch(rPath(path,baseurl))
---	if (path:prot()==nil) then
---		local rpath=rPath(path)
---		
---		local base=baseurl
---		return ffetch(base..rpath)
---	else
---		--it's a direct url
---		return ffetch(path)
---	end
+end
+
+--styling
+local function attachStyling(style,env)
+	if (env.__attachedStyling[style]) return
+	env.__attachedStyling[style]=true
+	if (type(style)=="string") then
+		if (style:ext()=="style") then
+			local data=rFetch(style)
+			if (data) then
+				data=data:split("\n")
+				local obj=""
+				local typ=""
+				local properties={}
+				for i=1, #data do
+					local s=data[i]
+					--why is there a \n remnant?
+					--last index doesn't have remnant
+					if (i<#data) then
+						s=s:sub(1,-2)
+					end
+					if (s!="") then
+						local info=s:split("=")
+						if (#info==1) then
+							--name, opener, closer
+							if (s=="{") then
+								if (obj=="") then --blank == defaults
+									obj="page" --(alias)
+									typ="system"
+								end
+							elseif (s=="}") then
+								--closer, push to styling
+								if (env.__styling[typ][obj]==nil) env.__styling[typ][obj]={}
+								for k,v in pairs(properties) do
+									env.__styling[typ][obj][k]=v
+								end
+								properties={}
+								obj=""
+							elseif (#s>0) then --ensure not a blank line
+								local ss=s
+								typ="element"
+								if (s:sub(1,1)==".") then
+									typ="class"
+									ss=ss:sub(2)
+								elseif (s:sub(1,1)=="#") then
+									typ="id"
+									ss=ss:sub(2)
+								elseif (s:sub(1,2)=="__") then
+									typ="system"
+									ss=ss:sub(2)
+								end
+								obj=ss --set name
+							end
+						elseif (#info==2) then
+							--k,v
+							local k,v=info[1],info[2]
+							properties[k]=v
+						end
+					end
+				end
+			end
+			pageDirty=true
+		else
+			webWarning("Invalid Styling format. (.style file)")
+		end
+	else
+		webWarning("Invalid Styling format. (.style file)")
+	end
+end
+
+local cacheCanvas=""
+--canvas
+local function enterCanvas(canvas)
+	if (canvas.screen) then
+		if (cacheCanvas=="") cacheCanvas=get_draw_target()
+		set_draw_target(canvas.screen)
+	end
+end
+
+local function exitCanvas()
+	if (cacheCanvas!="") then
+		set_draw_target(cacheCanvas)
+		cacheCanvas=""
+	end
+end
+
+--query strings
+local function packQuery(str) --does not support nested tables
+	if (type(str)=="table") then
+		local res=""
+		for k,v in pairs(str) do
+			res..=packQuery(k).."="..packQuery(v).."&"
+		end
+		if (res:sub(-1)=="&") res=res:sub(1,#res-1)
+		return res
+	elseif (type(str)!="string") then
+		str=tostr(str) --is this the right thing to do?
+	end
+	return (str:gsub("([^A-Za-z0-9%-_%.~])", function(c)
+		return string.format("%%%02X", string.byte(c))
+	end))
+end
+
+local function unpackQuery(str)
+	local res={}
+	
+	for pair in string.gmatch(str,"([^&]+)") do
+		local key,val=pair:match("([^=]+)=?(.*)")
+		if (key and val) then
+			key=key:gsub("+"," "):gsub("%%(%x%x)", function(h)
+				return string.char(tonumber(h,16))
+			end)
+			val=val:gsub("+"," "):gsub("%%(%x%x)", function(h)
+				return string.char(tonumber(h,16))
+			end)
+			local num=tonumber(val)
+			if num then
+				res[key]=num
+			else
+				res[key]=val
+			end
+		end
+	end
+	
+	return res
+end
+
+--sandbox functs
+
+local function sandboxedFunct(funct,safe_env,nilerror)
+	if (nilerror==nil) nilerror=true
+	if safe_env and type(safe_env[funct]) == "function" then
+		local ok, err = pcall(safe_env[funct],safe_env)
+		if not ok then
+			webWarning(funct.."() error: " .. tostring(err))
+		end
+	elseif (nilerror) then
+		webWarning(funct.." not found")
+	end
+end
+
+--helper
+local function swapCase(txt)
+	txt=txt:gsub("%a", function(c)
+		if c:match("%l") then
+			return c:upper()
+		else
+			return c:lower()
+		end
+	end)
+	return txt
+end
+
+--hell
+local function textEntities(text)
+	text=text:gsub("&lt;","<")
+	text=text:gsub("&gt;",">")
+	text=text:gsub("&amp;","&")
+	text=text:gsub("&quot;",'"')
+	text=text:gsub("&apos;","'")
+	text=text:gsub("&nbsp;","")
+	return text
 end
 
 local function toImage(img,bg)
 	if (type(img)=="string") then
 		if (img:ext()=="png") then
-			img=fetch(img)
+			img=rFetch(img)
 			if (type(img)=="userdata") then
 				local ud=userdata("u8",img:width(),img:height())
 				local trg=get_draw_target()
@@ -213,6 +350,44 @@ local function getElementById(id)
 	return page:getElementById(id)
 end
 
+local function getElementsByClassName(class)
+	return page:getElementsByClassName(class)
+end
+
+local function getDOM()
+	return page:getDOM()
+end
+
+local function moveElementAbove(moving,still)
+	if (type(moving)=="string") then
+		moving=page:getElementIndexById(moving)
+	else
+		moving=page:getElementIndexById(moving.id)
+	end
+	
+	if (type(still)=="string") then
+		still=page:getElementIndexById(still)
+	else
+		still=page:getElementIndexById(still.id)
+	end
+	return page:moveElementAbove(moving,still)
+end
+
+local function moveElementBelow(moving,still)
+	if (type(moving)=="string") then
+		moving=page:getElementIndexById(moving)
+	else
+		moving=page:getElementIndexById(moving.id)
+	end
+	
+	if (type(still)=="string") then
+		still=page:getElementIndexById(still)
+	else
+		still=page:getElementIndexById(still.id)
+	end
+	return page:moveElementBelow(moving,still)
+end
+
 local function destroyElement(obj)
 	if (type(obj)=="string") then
 		obj=page:getRawElementById(obj)
@@ -240,10 +415,18 @@ local function editableElement(el)
 		el[key]=val
 	end
 	
+	wrapper.resize=function(_,width,height)
+		el.width,el.height=width,height
+		page:rebuild()
+	end
+	
 	setmetatable(wrapper, {
 		__index = function(t, k)
 			if k == "set" then
 				return rawget(t, "set")
+			end
+			if k == "resize" then
+				return rawget(t, "resize")
 			end
 			return el[k] -- forward reads to the actual element
 		end,
@@ -259,6 +442,20 @@ end
 local function pushElement(obj,data)
 	local obj,success,msg=page:pushElement(obj,data)
 	return editableElement(obj),success,msg
+end
+
+local function pushElementAbove(obj,obj2,data)
+	local obj,success,msg=page:pushElementAbove(obj,obj2,data)
+	return editableElement(obj),success,msg
+end
+
+local function pushElementBelow(obj,obj2,data)
+	local obj,success,msg=page:pushElementBelow(obj,obj2,data)
+	return editableElement(obj),success,msg
+end
+
+local function setStyle(label,properties,replace)
+    page:setStyle(label,properties,replace)
 end
 
 local function openTab(url,replaceIndex)
@@ -310,6 +507,7 @@ local function wrapText(text,width,charWidth)
 	local fwidth=0
 	local i=1
 	
+	if (text==nil) return "",0,0
 	while true do
 		local nextnl=text:find("\n",i)
 		local segment=nextnl and text:sub(i,nextnl-1) or text:sub(i)
@@ -367,13 +565,68 @@ end
 
 --adds stuff like alignment and margins if missing
 
-local function fixData(data,defaults)
+local function fixData(data,class,id,env)
+	if (data.inline==nil) data.inline=unpod(pod(data)) --clone
+	local inline=data.inline
+	local element=data.type
+	class=class or ""
 	defaults=defaults or {}
-	data.align=data.align or defaults.align or "left"
-	data.margin_left=data.margin_left or defaults.margin_left or defaults.margin or data.margin or 0
-	data.margin_right=data.margin_right or defaults.margin_right or defaults.margin or data.margin or 0 --not implemented
-	data.margin_top=data.margin_top or defaults.margin_top or defaults.margin or data.margin or 0
-	data.margin_bottom=data.margin_bottom or defaults.margin_bottom or defaults.margin or data.margin or 0
+	local push={}
+	--priority:
+	-- 1 data given in tag
+	-- 2 id
+	-- 3 class
+	-- 4 element
+	-- 5 pure defaults
+	-- 6 default element
+	
+	push={ --pure defaults
+		align="left",
+		margin_left=0,
+		margin_right=0,
+		margin_top=0,
+		margin_bottom=0
+	}
+	if (env.__styling.defaultElement[element]) then
+		for k,v in pairs(env.__styling.defaultElement[element]) do
+			push[k]=v
+		end
+	end
+	if (env.__styling.element[element]) then
+		for k,v in pairs(env.__styling.element[element]) do
+			push[k]=v
+		end
+	end
+    --split into different classes
+    local classes=class:split(" ")
+    for i=1, #classes do
+    	if (classes[i]!="") then
+	    	if (env.__styling.class[classes[i]]) then
+	    		for k,v in pairs(env.__styling.class[classes[i]]) do
+	    			push[k]=v
+	    		end
+	    	end
+	    end
+	end
+    
+	if (env.__styling.id[id]) then
+		for k,v in pairs(env.__styling.id[id]) do
+			push[k]=v
+		end
+	end
+	
+	for k,v in pairs(inline) do
+		push[k]=v
+	end
+	
+	for k,v in pairs(push) do
+		data[k]=v
+	end
+	
+	if (data.font) then
+		if (data.font!=1 and data.font!=2) data.font=1
+	end
+	
 	return data
 end
 
@@ -389,108 +642,125 @@ end
 
 local objectHandler={
 	text=function(data,builder,pageData,env,x,y)
-		data=fixData(data)
+		data=fixData(data,data.class,data.id,env)
 		local pushbuild=true
 		x,y=builder.x,builder.y
-		local rawtext=data.rawtext or data.text or ""
-		local text,nl,width=wrapText(rawtext,pageData.width,5)
-		local col=data.color or 0
-		local height=nl*11
+		local rawtext=data.rawtext or data.text
+		local font=data.font
+		local text,nl,width=wrapText(rawtext,pageData.width,fonts[font].width)
+		if (font==2) text=swapCase(text)
+		local height=nl*fonts[font].height
 		if (pushbuild) then
 			builder.y+=data.margin_top+height+data.margin_bottom
 		end
 		x,y=applyAlignment(data.align,x,y,width,height,pageData)
 		x,y=applyMargin(data,x,y)
-		return {
+		
+		local el={
 			x=x,y=y,
 			width=width,height=height,
 			rawtext=rawtext,
 			text=text,
-			color=col,
 			hover=false,
-			underline=data.underline,
 			draw=function(self)
-				print(self.text,self.x,self.y,self.color)
+				local prefix=""
+				if (self.font==2) prefix="\014"
+				local c=self.color
+				if (self.hover and self.hovercolor) then
+					c=self.hovercolor
+				end
+				print(prefix..self.text,self.x,self.y,c)
 				if (self.underline) then
 					if (not self.underlinecache) self.underlinecache=self.text:gsub("[^\n]","_")
-					print(self.underlinecache,self.x,self.y+2,self.color)
-					print(self.underlinecache,self.x,self.y+2,self.color)
-					print(self.underlinecache,self.x-1,self.y+2,self.color)
+					print(prefix..self.underlinecache,self.x,self.y+2,c)
+					print(prefix..self.underlinecache,self.x,self.y+2,c)
+					print(prefix..self.underlinecache,self.x-1,self.y+2,c)
 				end
 			end
-		},builder
+		}
+		for k,v in pairs(data) do
+			if (el[k]==nil) then
+				el[k]=v
+			end
+		end
+		return el,builder
 	end,
 	title=function(data,builder,pageData,env,x,y)
-		data=fixData(data,{margin_top=2,align="center"})
+		data=fixData(data,data.class,data.id,env)
 		local pushbuild=true
 		x,y=builder.x,builder.y
 		local rawtext=data.rawtext or data.text or ""
-		local text,nl,width=wrapText(rawtext,pageData.width,10)
-		local col=data.color or 0
-		local height=nl*22
+		local font=data.font
+		--*2 because title
+		local text,nl,width=wrapText(rawtext,pageData.width,fonts[font].width*2)
+		if (font==2) text=swapCase(text)
+		local height=nl*fonts[font].height*2
 		if (pushbuild) then
 			builder.y+=data.margin_top+height+data.margin_bottom
 		end
 		x,y=applyAlignment(data.align,x,y,width,height,pageData)
 		x,y=applyMargin(data,x,y)
-		return {
+		local el={
 			x=x,y=y,
 			rawtext=data.text,
 			text=text,
-			color=col,
 			width=width,height=height,
 			hover=false,
-			underline=data.underline,
 			draw=function(self)
-				print("\^p"..self.text,self.x,self.y,self.color)
-				print("\^p"..self.text,self.x,self.y+1,self.color)
-				print("\^p"..self.text,self.x+1,self.y,self.color)
-				print("\^p"..self.text,self.x+1,self.y+1,self.color)
+				local prefix="\^p"
+				if (font==2) prefix..="\014"
+				local c=self.color
+				if (self.hover and self.hovercolor) then
+					c=self.hovercolor
+				end
+				print(prefix..self.text,self.x,self.y,c)
+				print(prefix..self.text,self.x,self.y+1,c)
+				print(prefix..self.text,self.x+1,self.y,c)
+				print(prefix..self.text,self.x+1,self.y+1,c)
 				if (self.underline) then
 					if (not self.underlinecache) self.underlinecache=self.text:gsub("[^\n]","_")
-					print("\^p"..self.underlinecache,self.x,self.y+4,self.color)
-					print("\^p"..self.underlinecache,self.x-1,self.y+4,self.color)
-					print("\^p"..self.underlinecache,self.x-2,self.y+4,self.color)
-					print("\^p"..self.underlinecache,self.x-3,self.y+4,self.color)
+					print(prefix..self.underlinecache,self.x,self.y+4,c)
+					print(prefix..self.underlinecache,self.x-1,self.y+4,c)
+					print(prefix..self.underlinecache,self.x-2,self.y+4,c)
+					print(prefix..self.underlinecache,self.x-3,self.y+4,c)
 				end
 			end
-		},builder
+		}
+		for k,v in pairs(data) do
+			if (el[k]==nil) then
+				el[k]=v
+			end
+		end
+		
+		return el,builder
 	end,
 	link=function(data,builder,pageData,env,x,y)
-		data=fixData(data,{})
+		data=fixData(data,data.class,data.id,env)
 		local pushbuild=true
 		x,y=builder.x,builder.y
 		local rawtext=data.rawtext or data.text or ""
-		local text,nl,width=wrapText(rawtext,pageData.width,5)
-		local col=data.color or 12
-		local height=nl*11
+		local font=data.font
+		local text,nl,width=wrapText(rawtext,pageData.width,fonts[font].width)
+		local height=nl*fonts[font].height
 		if (pushbuild) then
 			builder.y+=data.margin_top+height+data.margin_bottom
 		end
-		local hovercol=data.hovercolor or 1
 		x,y=applyAlignment(data.align,x,y,width,height,pageData)
 		x,y=applyMargin(data,x,y)
-		local leftmouseclick=[[openTab(self.target,self.where)]]
+		local leftmouseclick=[[file.openPage(self.target,self.where)]]
 		if (data.method=="download") then
-			leftmouseclick=[[download(self.target)]]
+			leftmouseclick=[[file.download(self.target)]]
 		end
-		return {
+		local el={
 			x=x,y=y,
 			width=width,height=height,
-			cursor="pointer",
 			rawtext=rawtext,
 			text=text,
-			color=col,
-			hovercol=hovercol,
-			target=data.target or "self://404",
-			where=data.where or "new",
 			hover=false,
-			underline=data.underline or true,
-			method=data.method or "link",
 			draw=function(self)
 				local c=self.color
-				if (self.hover) then
-					c=self.hovercol
+				if (self.hover and self.hovercolor) then
+					c=self.hovercolor
 				end
 				print(self.text,self.x,self.y,c)
 				if (self.underline) then
@@ -500,46 +770,22 @@ local objectHandler={
 				end
 			end,
 			leftmouseclick=leftmouseclick,
-			middlemouseclick=[[openTab(self.target,"new")]]
-		},builder
-	end,
-	p8text=function(data,builder,pageData,env,x,y)
-		data=fixData(data,{margin_bottom=3})
-		local pushbuild=true
-		x,y=builder.x,builder.y
-		local rawtext=data.rawtext or data.text or ""
-		local text,nl,width=wrapText(swapCase(rawtext),pageData.width,4)
-		local col=data.color or 0
-		local height=nl*6
-		if (pushbuild) then
-			builder.y+=data.margin_top+height+data.margin_bottom
-		end
-		x,y=applyAlignment(data.align,x,y,width,height,pageData)
-		x,y=applyMargin(data,x,y)
-		return {
-			x=x,y=y,
-			rawtext=rawtext,
-			text=text,
-			color=col,
-			width=width,height=height,
-			hover=false,
-			underline=data.underline,
-			draw=function(self)
-				print("\014"..self.text,self.x,self.y,self.color)
-				if (self.underline) then
-					if (not self.underlinecache) self.underlinecache=self.text:gsub("[^ \n]","_")
-					print("\014"..self.underlinecache,self.x,self.y+2,self.color)
-					print("\014"..self.underlinecache,self.x-1,self.y+2,self.color)
-				end
+			middlemouseclick=[[file.openPage(self.target,"new")]]
+		}
+		for k,v in pairs(data) do
+			if (el[k]==nil) then
+				el[k]=v
 			end
-		},builder
+		end
+		
+		return el,builder
 	end,
 	image=function(data,builder,pageData,env,x,y)
-		data=fixData(data)
+		data=fixData(data,data.class,data.id,env)
 		
 		local pushbuild=true
 		x,y=builder.x,builder.y
-		local img=toImage(data.src,env.__background)
+		local img=toImage(data.src,env.__styling.system.page.background)
 		if (img) then
 			local w=data.width or img:width()
 			local h=data.height or img:height()
@@ -572,7 +818,7 @@ local objectHandler={
 			
 			local timg = userdata("u8",w,h)
 			set_draw_target(timg)
-			cls(env.__background)
+			cls(env.__styling.system.page.background)
 			sspr(img,0,0,nil,nil,0,0,w,h)
 			set_draw_target()
 			img=timg
@@ -583,7 +829,7 @@ local objectHandler={
 			x,y=applyMargin(data,x,y)
 			x,y=applyAlignment(data.align,x,y,img:width(),img:height(),pageData)
 			
-			return {
+			local el={
 				x=x,y=y,
 				csrc=data.src,
 				src=data.src,
@@ -593,14 +839,27 @@ local objectHandler={
 				draw=function(self)
 					spr(self.img,self.x,self.y)
 				end
-			},builder
+			}
+			for k,v in pairs(data) do
+				if (el[k]==nil) then
+					el[k]=v
+				end
+			end
+			return el,builder
 		else
 			webWarning("Failed to load image from source "..tostr(data.src),1)
-			return {
+			local el={
 				x=x,y=y,
 				width=0,0,
 				hover=false
-			},builder
+			}
+			for k,v in pairs(data) do
+				if (el[k]==nil) then
+					el[k]=v
+				end
+			end
+			
+			return el,builder
 		end
 	end,
 	script=function(data,builder,pageData,env,x,y)
@@ -612,6 +871,20 @@ local objectHandler={
 			init=function(self)
 				if (self.src) then
 					attachScript(self.src,env)
+				end
+				destroyElement(self)
+			end
+		},builder
+	end,
+	style=function(data,builder,pageData,env,x,y)
+		--delete on init
+		return {
+			x=0,y=0,
+			width=0,height=0,
+			src=data.src,
+			init=function(self)
+				if (self.src) then
+					attachStyling(self.src,env)
 				end
 				destroyElement(self)
 			end
@@ -629,42 +902,37 @@ local objectHandler={
 	end,
 	input=function(data,builder,pageData,env,x,y)
 		--input text
-		data=fixData(data)
+		data=fixData(data,data.class,data.id,env)
 		local pushbuild=true
 		x,y=builder.x,builder.y
 		local rawtext=data.rawtext or data.text or ""
 		local text=rawtext
 		local wwidth=#text*5
-		data.dynamic_width=(data.dynamic_width!=nil and data.dynamic_width) or (data.width!=nil)
+		local height=data.height
 		local width=data.width or mid(30,wwidth,pageData.width-30)
-		local col=data.color or 7
-		local bg=data.background or 1
-		local height=11
 		if (pushbuild) then
 			builder.y+=data.margin_top+height+data.margin_bottom
 		end
 		x,y=applyAlignment(data.align,x,y,width,height,pageData)
 		x,y=applyMargin(data,x,y)
-		return {
+		local el={
 			x=x,y=y,
-			width=width,height=height,
-			dynamic_width=data.dynamic_width or (data.width!=nil),
+			width=width,
 			rawtext=rawtext,
 			text=text,
-			background=bg,
-			placeholder=data.placeholder or "",
-			placeholder_color=data.placeholder_color or 6,
-			color=col,
 			hover=false,
-			cursor="edit",
 			selected=false,
 			draw=function(self)
+				local c=self.color
+				if (self.hover and self.hovercolor) then
+					c=self.hovercolor
+				end
 				rectfill(self.x,self.y,self.x+self.width-1,self.y+self.height-1,self.background)
 				local t=self.text
 				if (#t==0) then
 					if (not self.selected) print(self.placeholder,self.x+1,self.y+1,self.placeholder_color)
 				else
-					print(t,self.x+1,self.y+1,self.color)
+					print(t,self.x+1,self.y+1,c)
 				end
 				if (self.selected) then
 					local xx=self.x+#t*5+1
@@ -673,14 +941,16 @@ local objectHandler={
 				end
 			end,
 			__raw_update=[[
-				local inp=readtext()
-				if (keyp("enter") and self.enter) self:enter()
-				if (keyp("tab") and self.tab) self:tab()
-				if (keyp("backspace")) then
-					self.text=self.text:sub(1,-2)
-				end
-				if (inp) then
-					self.text..=inp
+				if (self.selected) then
+					local inp=readtext()
+					if (keyp("enter") and self.enter) self:enter()
+					if (keyp("tab") and self.tab) self:tab()
+					if (keyp("backspace")) then
+						self.text=self.text:sub(1,-2)
+					end
+					if (inp) then
+						self.text..=inp
+					end
 				end
 				if (self.dynamic_width) then
 					local t=self.text
@@ -693,8 +963,110 @@ local objectHandler={
 			leftmouseclick=[[
 				self.selected=true
 			]]
-		},builder
-	end
+		}
+		for k,v in pairs(data) do
+			if (el[k]==nil) then
+				el[k]=v
+			end
+		end
+		
+		return el,builder
+	end,
+	gap=function(data,builder,pageData,env,x,y)
+		--input text
+		data=fixData(data,data.class,data.id,env)
+		local pushbuild=true
+		x,y=builder.x,builder.y
+		local height=data.height
+		if (pushbuild) then
+			builder.y+=data.margin_top+height+data.margin_bottom
+		end
+--		x,y=applyAlignment(data.align,x,y,width,height,pageData) why
+		x,y=applyMargin(data,x,y) --also why but more seen why
+		local el={
+			x=x,y=y,
+			width=0
+		}
+		for k,v in pairs(data) do
+			if (el[k]==nil) then
+				el[k]=v
+			end
+		end
+		return el,builder
+	end,
+	canvas=function(data,builder,pageData,env,x,y)
+		data=fixData(data,data.class,data.id,env)
+		local pushbuild=true
+		x,y=builder.x,builder.y
+		local width=data.width or 50
+		local height=data.height or 50
+		if (pushbuild) then
+			builder.y+=data.margin_top+height+data.margin_bottom
+		end
+		x,y=applyAlignment(data.align,x,y,width,height,pageData)
+		x,y=applyMargin(data,x,y)
+		local el={
+			x=x,y=y,
+			width=width,height=height,
+			hover=false,
+			__raw_update=function(self)
+				if (self.screen==nil or self.width!=self.screen:width() or self.height!=self.screen:height()) then
+					self.screen=userdata("u8",self.width,self.height)
+				end
+			end,
+			draw=function(self)
+				spr(self.screen,self.x,self.y)
+			end
+		}
+		for k,v in pairs(data) do
+			if (el[k]==nil) then
+				el[k]=v
+			end
+		end
+		
+		return el,builder
+	end,
+	
+	--deprecated elements, keeping for compatibility
+	p8text=function(data,builder,pageData,env,x,y) --deprec. 2.3
+		data=fixData(data,data.class,data.id,env)
+		local pushbuild=true
+		x,y=builder.x,builder.y
+		local rawtext=data.rawtext or data.text or ""
+		local text,nl,width=wrapText(swapCase(rawtext),pageData.width,4)
+		local height=nl*6
+		if (pushbuild) then
+			builder.y+=data.margin_top+height+data.margin_bottom
+		end
+		x,y=applyAlignment(data.align,x,y,width,height,pageData)
+		x,y=applyMargin(data,x,y)
+		local el={
+			x=x,y=y,
+			rawtext=rawtext,
+			text=text,
+			width=width,height=height,
+			hover=false,
+			draw=function(self)
+				local c=self.color
+				if (self.hover and self.hovercolor) then
+					c=self.hovercolor
+				end
+				print("\014"..self.text,self.x,self.y,c)
+				if (self.underline) then
+					if (not self.underlinecache) self.underlinecache=self.text:gsub("[^ \n]","_")
+					print("\014"..self.underlinecache,self.x,self.y+2,c)
+					print("\014"..self.underlinecache,self.x-1,self.y+2,c)
+				end
+			end
+		}
+		for k,v in pairs(data) do
+			if (el[k]==nil) then
+				el[k]=v
+			end
+		end
+		
+		return el,builder
+	end,
 }
 
 --element method
@@ -965,109 +1337,104 @@ end
 --data = either website.com/icon.png OR raw filedata
 --filename = blank if using website, must set for raw filedata
 local function pageDownload(data,filename)
-	if (data==nil) webWarning("No data attached to download") return "No data attached to download"
+	if (data==nil) webWarning("No data attached to download") return false,"No data attached to download"
 	if (filename==nil) then
 		filename=data:basename()
-		data=fetch(data)
+		data=rFetch(data)
 		if (data==nil) then
-			webWarning("Failed to download - download(data/filename,[filename])") return "Failed to download - download(data/filename,[filename])"
+			webWarning("Failed to download - download(data/filename,[filename])") return false,"Failed to download - download(data/filename,[filename])"
 		end
 	end
 	page:download(data,filename)
+	return true
 end
 
+local function urlToLocalStorage(url)
+	path=cleanURL(url)
+	path=path:gsub(":","_")
+	path..="/"
+	return path
+end
+
+local pageFunctions={
+	localStorage={
+		store=function(data,name)
+			if (name==nil) then
+				webWarning("localStorage.store(table,name)")
+				return false
+			end
+			if (type(data)!="table") then
+				webWarning("You can only store pods/tables")
+				return false
+			end
+			if (name:ext()==nil) then
+				name..=".pod"
+			elseif (name:ext()!="pod") then
+				name..=".pod"
+			end
+			
+			local path=localStorageFolder..urlToLocalStorage(baseurl)
+			mkdir(path)
+			store(path..name,data)
+			return true
+		end,
+		fetch=function(name)
+			if (name:ext()==nil) then
+				name..=".pod"
+			elseif (name:ext()!="pod") then
+				name..=".pod"
+			end
+			
+			local path=localStorageFolder..urlToLocalStorage(baseurl)
+			return fetch(path..name)
+		end
+	},
+	dom={
+		getElementById=getElementById,
+		getElementsByClassName=getElementsByClassName,
+		
+		get=get,
+		
+		destroyElement=destroyElement,
+		
+		pushElement=pushElement,
+		
+		pushElementBelow=pushElementBelow,
+		pushElementAbove=pushElementAbove,
+		
+		moveElementBelow=moveElementBelow,
+		moveElementAbove=moveElementAbove,
+		
+		setStyle=setStyle,
+		
+		canvas={
+			enter=function(element)
+				if (cacheCanvas=="") cacheCanvas=get_draw_target()
+				set_draw_target(element.screen)
+				palt(0,true)
+			end,
+			exit=function()
+				set_draw_target(cacheCanvas)
+				palt(0,false)
+				cacheCanvas=""
+			end
+		},
+	},
+	query={
+		pack=packQuery,
+		unpack=unpack
+	},
+	file={
+		openPage=openRelativeTab,
+		download=pageDownload,
+	},
+	attach={
+		scripts=attachScripts,
+		styling=attachStyling
+	}
+}
+
 local permittedFunctions={
-	logic={
-		name="Logic",
-		description="Acess to logical functions",
-		risk=1,
-		functions={
-			abs=abs,
-			all=all,
-			atan2=atan2,
-			blit=blit,
-			ceil=ceil,
-			cos=cos,
-			flr=flr,
-			mid=mid,
-			min=min,
-			math=math,
-			max=max,
-			string=string,
-			sub=sub,
-			rnd=rnd,
-			sgn=sgn,
-			sin=sin,
-			split=split,
-			sqrt=sqrt,
-			srand=srand,
-			t=t,
-			time=time,
-		}
-	},
-	variables={
-		name="Variables",
-		description="Acess to variable functions",
-		risk=1,
-		functions={
-			USERDATA=USERDATA,
-			add=add,
-			count=count,
-			del=del,
-			deli=deli,
-			foreach=foreach,
-			ipairs=ipairs,
-			pairs=pairs,
-			get=get,
-			chr=chr,
-			tonum=tonum,
-			tonumber=tonumber,
-			tostr=tostr,
-			tostring=tostring,
-			ord=ord,
-			pack=pack,
-			set=set,
-			unpack=unpack,
-			unpod=unpod,
-			userdata=userdata,
-			utf8=utf8,
-			vec=vec,
-			table=table,
-			type=type,
-			pod=pod,
-		}
-	},
-	graphics={
-		name="Graphics",
-		description="Graphical functions",
-		risk=1,
-		functions={
-			cls=cls,
-			color=color,
-			clip=clip,
-			circ=circ,
-			circfill=circfill,
-			camera=camera,
-			fillp=fillp,
-			flip=flip,
-			get_display=get_display,
-			get_draw_target=get_draw_target,
-			set_draw_target=set_draw_target,
-			line=line,
-			oval=oval,
-			ovalfill=ovalfill,
-			rect=rect,
-			rectfill=rectfill,
-			tline=tline,
-			tline3d=tline3d,
-			pset=pset,
-			pget=pget,
-			print=print,
-			pal=pal,
-			palt=palt,
-			select=select
-		}
-	},
 	sprites={
 		name="Sprites",
 		description="Read/write to the sprites",
@@ -1099,26 +1466,6 @@ local permittedFunctions={
 			music=music,
 			note=note,
 			sfx=sfx
-		}
-	},
-	controllerInputs={
-		name="Controller",
-		description="Read controller inputs",
-		risk=1,
-		functions={
-			btn=btn,
-			btnp=btnp
-		}
-	},
-	keyboardInputs={
-		name="Keyboard",
-		description="Access keyboard inputs",
-		risk=2,
-		functions={
-			key=key,
-			keyp=keyp,
-			peektext=peektext,
-			readtext=readtext,
 		}
 	},
 	clipboard={
@@ -1167,7 +1514,7 @@ local permittedFunctions={
 	},
 	gui={
 		name="GUIs",
-		description="Ability to create GUIs",
+		description="Ability to create GUIs (buggy, not recommended)",
 		risk=1,
 		functions={
 			create_gui=create_gui
@@ -1192,63 +1539,6 @@ local permittedFunctions={
 			notify=notify
 		}
 	},
-	picotronInformation={
-		name="Picotron Information",
-		description="Ability to access information like date & stat",
-		risk=1,
-		functions={
-			date=date,
-			stat=stat
-		}
-	},
-	dom={
-		name="DOM",
-		description="Ability to access the DOM",
-		risk=1,
-		functions={
-			getElementById=getElementById,
-			destroyElement=destroyElement,
-			pushElement=pushElement
-		}
-	},
-	fetch={
-		name="Fetch",
-		description="Ability to fetch files (online only)",
-		risk=2,
-		functions={
-			fetch=sandboxedFetch
-		}
-	},
-	debug={
-		name="Debug",
-		description="Debug tools",
-		risk=1,
-		functions={
-			warn=webWarning,
-			webwarn=webWarning,
-			webWarn=webWarning,
-			webWarning=webWarning,
-			printh=sandboxedPrinth
-		}
-	},
-	openPages={
-		name="Open Pages",
-		description="Ability to open/close pages",
-		risk=2,
-		functions={
-			openTab=openRelativeTab,
-			openRelativeTab=openRelativeTab,
-			download=pageDownload
-		}
-	},
-	attachScripts={
-		name="Attach Scripts",
-		description="Ability to attach scripts (sandboxed)",
-		risk=1,
-		functions={
-			attachScripts=attachScripts
-		}
-	},
 	networking={
 		name="Networking",
 		description="Sockets",
@@ -1260,9 +1550,112 @@ local permittedFunctions={
 }
 
 local alwaysAllowedFunctions={
-	packQuery=packQuery,
-	unpackQuery=unpackQuery
+	--debug
+	warn=webWarning,
+	webwarn=webWarning,
+	webWarn=webWarning,
+	webWarning=webWarning,
+	printh=sandboxedPrinth,
+	
+	--text input
+	key=key,
+	keyp=keyp,
+	peektext=peektext,
+	readtext=readtext,
+	
+	--controller input
+	btn=btn,
+	btnp=btnp,
+	
+	--graphical
+	
+	cls=cls,
+	color=color,
+	clip=clip,
+	circ=circ,
+	circfill=circfill,
+	camera=camera,
+	fillp=fillp,
+	flip=flip,
+	get_display=get_display,
+	get_draw_target=get_draw_target,
+	set_draw_target=set_draw_target,
+	line=line,
+	oval=oval,
+	ovalfill=ovalfill,
+	rect=rect,
+	rectfill=rectfill,
+	tline=tline,
+	tline3d=tline3d,
+	pset=pset,
+	pget=pget,
+	print=print,
+	pal=pal,
+	palt=palt,
+	
+	--variables
+	
+	select=select,
+	USERDATA=USERDATA,
+	add=add,
+	count=count,
+	del=del,
+	deli=deli,
+	foreach=foreach,
+	ipairs=ipairs,
+	pairs=pairs,
+	get=get,
+	chr=chr,
+	tonum=tonum,
+	tonumber=tonumber,
+	tostr=tostr,
+	tostring=tostring,
+	ord=ord,
+	pack=pack,
+	set=set,
+	unpack=unpack,
+	unpod=unpod,
+	userdata=userdata,
+	utf8=utf8,
+	vec=vec,
+	table=table,
+	type=type,
+	pod=pod,
+	
+	--logic
+	abs=abs,
+	all=all,
+	atan2=atan2,
+	blit=blit,
+	ceil=ceil,
+	cos=cos,
+	flr=flr,
+	mid=mid,
+	min=min,
+	math=math,
+	max=max,
+	string=string,
+	sub=sub,
+	rnd=rnd,
+	sgn=sgn,
+	sin=sin,
+	split=split,
+	sqrt=sqrt,
+	srand=srand,
+	t=t,
+	time=time,
+	
+	--info
+	date=date,
+	stat=stat,
+	
+	--page backend
+	fetch=sandboxedFetch
 }
+
+for k,v in pairs(pageFunctions) do
+	alwaysAllowedFunctions[k]=v
+end
 
 local function loadPermissions(environment,allowed)
 	for i=1, #allowed do
@@ -1286,13 +1679,33 @@ local function buildEnvironment(permissions,data,pageData)
 	scriptEnvironment.__scroll={x=0,y=0}
 	scriptEnvironment.__cursorData={x=0,y=0,rawx=0,rawy=0,b=0,wheelx=0,wheely=0,lb=0}
 	scriptEnvironment.__lastCursorData={x=0,y=0,rawx=0,rawy=0,b=0,wheelx=0,wheely=0,lb=0}
-	scriptEnvironment.__background=data.background or 7
 	scriptEnvironment.__invertScrollX=data.invertScrollX or false
 	scriptEnvironment.__invertScrollY=data.invertScrollY or false
 	scriptEnvironment.__scrollSpeed=data.scrollSpeed or 8
 	scriptEnvironment.__pageData=pageData
 	scriptEnvironment.__viewport={width=0,height=0}
+	--push defaults here
+	scriptEnvironment.__styling={
+		system={
+			page={
+				background=data.background or 7
+			},
+		},
+		class={},
+		id={},
+		element={},
+		defaultElement={
+			title={margin_top=2,align="center",color=0,font=1,cursor=1},
+			text={color=0,font=1,cursor=1},
+			p8text={color=0,font=1,cursor=1},
+			link={color=12,hovercolor=1,font=1,cursor="pointer",where="new",method="webpage",underline=true},
+			input={color=7,background=1,dynamic_width=true,placeholder_color=6,cursor="edit",font=1,height=11},
+			gap={height=11},
+			canvas={}
+		},
+	}
 	scriptEnvironment.__attachedScripts={} --unlisted
+	scriptEnvironment.__attachedStyling={} --unlisted
 	--allowed defaults
 	scriptEnvironment=loadPermissions(scriptEnvironment,permissions)
 --	setmetatable(scriptEnvironment, {
@@ -1345,11 +1758,83 @@ page.getElementById = function(self, id)
 	return editableElement(el)
 end
 
-page.getRawElementById = function(self, id)
-	local el = self.builtPage[self.idLookup[id]]
-	if (not el) return nil
+page.getElementsByClassName = function(self,class)
+    local res={}
+    for i=1, #self.builtPage do
+        local classes=self.builtPage[i].class or ""
+        classes=classes:split(" ")
+        for j=1, #classes do
+            if (classes[j]==class) then
+                add(res,editableElement(self.builtPage[i]))
+            end
+        end
+    end
 	
-	return el
+	return res
+end
+
+page.getDOM = function(self)
+	local res={}
+	for i=1, #self.builtPage do
+		add(res,editableElement(self.builtPage[i]))
+	end
+	return res
+end
+
+page.getElementIndexById = function(self, id)
+	local index=self.idLookup[id]
+	if (not index) return nil
+	
+	return index
+end
+
+page.getRawElementById = function(self, id)
+	local index=self:getElementIndexById(id)
+	if (not index) return nil,nil
+	local el = self.builtPage[index]
+	if (not el) return nil,index --what
+	
+	return el,index
+end
+
+page.moveElementAbove = function(self,moving,still)
+	local tbl={}
+	local index
+	if (moving and still) then
+		for i=1, #self.builtPage do
+		if (moving!=i) then
+			if (still==i) then
+				--push the moving element above
+				add(tbl,self.builtPage[moving])
+				index=#self.builtPage
+			end
+				add(tbl,self.builtPage[i])
+			end
+		end
+	end
+	self.builtPage=tbl
+	pageDirty=true
+	return index
+end
+
+page.moveElementBelow = function(self,moving,still)
+	local tbl={}
+	local index
+	if (moving and still) then
+		for i=1, #self.builtPage do
+			if (moving!=i) then
+				add(tbl,self.builtPage[i])
+				if (still==i) then
+					--push the moving element below
+					add(tbl,self.builtPage[moving])
+					index=#self.builtPage
+				end
+			end
+		end
+	end
+	self.builtPage=tbl
+	pageDirty=true
+	return index
 end
 
 page.pushElement=function(self,obj,data)
@@ -1362,7 +1847,46 @@ page.pushElement=function(self,obj,data)
 		end
 	end
 	local obj,success,msg=append(obj,self.builtPage,self.pageBuilder,self.pageData,self.env,self)
+	pageDirty=true
 	return obj,success,msg
+end
+
+page.pushElementAbove=function(self,obj,still,data)
+	local elm=self:pushElement(obj,data)
+	return editableElement(self:moveElementAbove(#self.builtPage,self:getElementIndexById(still)))
+end
+
+page.pushElementBelow=function(self,obj,still,data)
+	local elm=self:pushElement(obj,data)
+	return editableElement(self:moveElementBelow(#self.builtPage,self:getElementIndexById(still)))
+end
+
+page.setStyle=function(self,label,properties,replace)
+	if (replace==nil) replace=false
+	local typ="element"
+	local label=label or ""
+	if (label:sub(1,1)==".") then
+		typ="class"
+		label=label:sub(2)
+	elseif (label:sub(1,1)=="#") then
+		typ="id"
+		label=label:sub(2)
+	elseif (label:sub(1,2)=="__") then
+		typ="system"
+		label=label:sub(2)
+	elseif (label=="") then
+		typ="system"
+		label="page"
+	end
+	
+	if (replace) then
+		self.env.__styling[typ][label]=properties
+	else
+		for k,v in pairs(properties) do
+			self.env.__styling[typ][label][k]=v
+		end
+	end
+	pageDirty=true
 end
 
 page.newTab=function(self,url,selff)
@@ -1457,45 +1981,7 @@ page.rebuild=function(self)
 	end
 end
 
-function packQuery(str) --does not support nested tables
-	if (type(str)=="table") then
-		local res=""
-		for k,v in pairs(str) do
-			res..=packQuery(k).."="..packQuery(v).."&"
-		end
-		if (res:sub(-1)=="&") res=res:sub(1,#res-1)
-		return res
-	elseif (type(str)!="string") then
-		str=tostr(str) --is this the right thing to do?
-	end
-	return (str:gsub("([^A-Za-z0-9%-_%.~])", function(c)
-		return string.format("%%%02X", string.byte(c))
-	end))
-end
-
-function unpackQuery(str)
-	local res={}
-	
-	for pair in string.gmatch(str,"([^&]+)") do
-		local key,val=pair:match("([^=]+)=?(.*)")
-		if (key and val) then
-			key=key:gsub("+"," "):gsub("%%(%x%x)", function(h)
-				return string.char(tonumber(h,16))
-			end)
-			val=val:gsub("+"," "):gsub("%%(%x%x)", function(h)
-				return string.char(tonumber(h,16))
-			end)
-			local num=tonumber(val)
-			if num then
-				res[key]=num
-			else
-				res[key]=val
-			end
-		end
-	end
-	
-	return res
-end
+local sfetch=function() end
 
 page.init=function(self,data)
 	baseurl=data.url
@@ -1509,7 +1995,14 @@ page.init=function(self,data)
 	rawset(self.env,"__queries",unpackQuery(query))
 	self.pageData={width=0,height=0}
 	self:setDisplay(data.width,data.height,false)
-	ffetch=data.fetch
+	sfetch=data.fetch or fetch
+	ffetch=function(v,a)
+		local data=sfetch(v,a)
+		if (v==nil) then
+			webWarning("Could not fetch "..v)
+		end
+		return data
+	end
 	self.rippedPage=ripPage(data.url,self)
 	if (self.rippedPage==nil) return "404"
 	self.lastcurs={}
@@ -1541,6 +2034,7 @@ page.update=function(self,data)
 	rawset(self.env,"__viewport",{width=self.width,height=self.height})
 	rawset(self.env,"__cursorSprite",1)
 	updatePage(self,self.builtPage,curs)
+	exitCanvas() --ensure canvas is exited
 	sandboxedFunct("__raw_update",self.env,false)
 	sandboxedFunct("_update",self.env,false)
 	return {
@@ -1556,8 +2050,9 @@ page.draw=function(self,x,y)
 	local ud=userdata("u8",w,h)
 	set_draw_target(ud)
 	pal(0,32)
-	cls(self.env.__background)
+	cls(self.env.__styling.system.page.background)
 	drawPage(self.builtPage,ud)
+	exitCanvas() --ensure canvas is exited
 	camera()
 	sandboxedFunct("_draw",self.env,false)
 	if (self.env.__scrollbarVisible) then
@@ -1572,4 +2067,4 @@ page.draw=function(self,x,y)
 end
 
 page.hasinit=false
-return page,"2.2.2"
+return page,"2.3"

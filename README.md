@@ -117,29 +117,17 @@ tabs[index].page:init(
 )
 ```
 
-The list of permission strings, as of PicoML v2.2 are:
+The list of permission strings, as of PicoML v2.3 are:
 ```lua
-logic
-variables
-graphics
 sprites
 map
 sound
-controllerInputs
-keyboardInputs
 clipboard
 unknownRisky
 risky
 memory
 gui
 windows
-notifications
-picotronInformation
-dom
-fetch
-debug
-openPages
-attachScripts
 networking
 ```
 
@@ -851,3 +839,4 @@ localStorage.store(table,filename) --store pods in storage
 ```lua
 localStorage.fetch(filename) --fetch pods in storage
 ```
+

@@ -328,6 +328,10 @@ Custom color palettes are typically unsupported - but theoretically possible (in
 
 `id` - the id name of an element, used for styling & scripting
 
+`margin` - the margin for all directions (px)
+
+`margin_left`, `margin_right`, `margin_top`, `margin_down` - the margin for specific directions (px)
+
 ### > Event Attributes:
 
 `leftmousedown`
@@ -839,4 +843,5 @@ localStorage.store(table,filename) --store pods in storage
 ```lua
 localStorage.fetch(filename) --fetch pods in storage
 ```
+
 
